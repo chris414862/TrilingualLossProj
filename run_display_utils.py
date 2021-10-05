@@ -4,7 +4,8 @@ import torch.nn as nn
 import re
 from torch.autograd import Variable
 from collections import OrderedDict, defaultdict, Counter
-from torch.profiler import profile, record_function, ProfilerActivity
+# from torch.profiler import profile, record_function, ProfilerActivity
+
 from itertools import zip_longest
 import pprint
 import sys

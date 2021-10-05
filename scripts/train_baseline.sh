@@ -10,22 +10,26 @@ SCRIPT_DIR=${SCRIPT_DIR%/}
 PROJECT_DIR=${SCRIPT_DIR%/*}
 DATA_TR=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_train_HDF5.json"
 DATA_VAL=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_valid_HDF5.json"
-MODE="train"
 TRAIN_SCRIPT="run_ResDavenet.py"
 
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="FULL_GRAPH_BASELINE"
+EXPDIR=$SCRATCH"/exps/FULL_GRAPH_BASELINE"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="full_graph_trip_loss_baseline.txt" 
-# If present, we will restrict gpu usage
+# If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
 devs_to_use=""
-# If present, will bypass argument check and directly run $TRAIN_SCRIPT
+# If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=1
 
-args=( "$@" ) # arguments in bash's array data structure
-extra_args=( ) # args for python training script
+#### Set python training programs defualt arguments
+extra_args=( "--batch-size=16" "--lr=.002" "--langs=english,japanese,hindi" "--mode=train") 
+extra_args+=("--image-output-head=self_attn" "--audio-output-head=self_attn" "--full-graph") 
+
+# Record arguments in bash's array data structure
+args=( "$@" ) 
+
 part_of_prev=0
 for i in $(seq 0 $# ); do 
     if [[ $part_of_prev -eq 1 ]]; then
@@ -66,13 +70,15 @@ done
 if [[ -z "$expdir" ]]; then
     expdir=$EXPDIR
     echo "WARNING: --exp-dir argument not found."
-    echo "         Experiment data will be placed in $expdir"
+    echo "          Experiment data will be placed in $expdir"
 fi
-if [[ -z "$expdir" ]]; then
+if [[ -z "$log_file" ]]; then
 
-    log_file=$LOG_FILE
-    echo "WARNING: --exp-dir argument not found."
-    echo "         Experiment data will be placed in $expdir"
+    echo "WARNING: --log argument not found."
+    if [[ -n "$LOG_FILE" ]]; then
+        log_file=$LOG_FILE
+        echo "          Using default log file name: $log_file"
+    fi
 
 fi
 if [[ -z "$devs_to_use" ]]; then
@@ -113,7 +119,7 @@ fi
 if [[ -n "$log_file" ]]; then
     printf "$fmt_str" "Log file:" "$log_file"
 else
-    printf "$fmt_str" "%-25s%s\n" "Log file:" "None given. No logging will be performed"
+    printf "$fmt_str" "Log file:" "None given"
 fi
 
 echo ""
@@ -144,22 +150,24 @@ if [[ "$skip_arg_check" -ne 1 ]]; then
     echo "---------------------------------------------------------------"
 fi
 
-# Make experiment directory
-mkdir "$expdir"
 
 #### Run $TRAIN_SCRIPT
 # Current script is expected to be in parent_dir($TRAIN_SCRIPT)/scripts/
-run_command="python $SCRIPT_DIR/../$TRAIN_SCRIPT --mode $MODE \
+run_command="python $SCRIPT_DIR/../$TRAIN_SCRIPT \
             --exp-dir $expdir \
             --data-train $DATA_TR --data-val $DATA_VAL ${extra_args[@]}"
 
 # Set available GPUs
-export CUDA_VISIBLE_DEVICES=$devs_to_use  
+if [[ -n "$devs_to_use" ]]; then 
+    export CUDA_VISIBLE_DEVICES=$devs_to_use  
+fi
 if [[ -z "$log_file" ]]; then
     # No double quotes around $run_command bc bash will interpret  
     # that as one long word and not be able to find that command 
     $run_command 
 else
+    ## Make experiment directory so that log file can be tee'd to
+    mkdir -p "$expdir"
     # Send all output to tee so output is displayed on terminal
     # as well as $log_file
     $run_command 2>&1 | tee "$log_file"

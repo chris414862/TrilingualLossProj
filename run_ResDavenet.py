@@ -228,6 +228,8 @@ def get_run_parser(parser=None):
             help='print model summaries')
     parser.add_argument('--mock-train4mem-stats', action="store_true",
             help='Perform mock training loop to get memory usage stats.')
+    parser.add_argument('--no-pbar', action='store_false', 
+            help="Don't display progress bar")
 
     return parser
 
