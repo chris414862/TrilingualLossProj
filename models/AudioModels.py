@@ -41,9 +41,14 @@ def make_batch_mask(nframes, max_seq_len, device):
             - Tensor containing the lengths of each sequence in batch
     """
     nframes = nframes[:, np.newaxis]
-    m = (torch.arange(max_seq_len, device=device).expand(nframes.shape[0], max_seq_len) < nframes).type(torch.int)
-    return m
-
+    indeces = torch.arange(max_seq_len, device=device)
+    bs = nframes.shape[0]
+    batch_indeces = indeces.expand(bs, max_seq_len).type(torch.float)
+    # batch_indeces dims: [batch_size, max_seq_len]
+    bool_mask = torch.lt(batch_indeces , nframes)
+    # bool_mask dims: [batch_size, max_seq_len]
+    float_mask = bool_mask.type(torch.float)
+    return float_mask
 
 
 
@@ -146,8 +151,15 @@ class ResDavenet(nn.Module):
         # x dims: [batch, downsampled_time_steps, embed_dim]
         pooling_ratio = round(orig_frames / x.size(-2))
         if nframes is not None:
-            curr_nframes = torch.div(nframes, pooling_ratio, rounding_mode="floor")
-            curr_nframes = torch.where(curr_nframes==0,1, curr_nframes) # prevent div by 0
+            curr_nframes:torch.Tensor = torch.div(nframes, pooling_ratio)
+            # Behavior of div has changed
+            # TODO: Check this for newer versions of pytorch
+            if curr_nframes.dtype != torch.int64:
+                curr_nframes = torch.trunc(curr_nframes)
+            curr_nframes = curr_nframes.type(torch.float)
+            curr_nframes = torch.where(curr_nframes==0,
+                                       torch.Tensor(1).to(curr_nframes.device).type(curr_nframes.dtype),
+                                       curr_nframes) # prevent div by 0
         else:
             curr_nframes = nframes
         x = self.head_layer(x, nframes=curr_nframes, cls_idxs=cls_idxs)

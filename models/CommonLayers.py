@@ -12,7 +12,7 @@ class PositionalEncoding(nn.Module):
         self.d_model = d_model
         self.dropout = nn.Dropout(p=dropout)
         self.position = torch.arange(max_len).unsqueeze(1).type(torch.float)
-        self.div_term = torch.exp(torch.arange(0, self.d_model, 2).unsqueeze(0) * (-math.log(10000.0) / self.d_model))
+        self.div_term = torch.exp(torch.arange(0, self.d_model, 2).type(torch.float).unsqueeze(0)*(-math.log(10000.0) / self.d_model))
         self.pe = nn.Parameter(torch.zeros(1, max_len, self.d_model, requires_grad=False), requires_grad=False)
         raw_positions = torch.mm(self.position, self.div_term)
         self.pe[0, :, 0::2] = self.pe[0, :, 0::2] + torch.sin(raw_positions)
@@ -34,7 +34,7 @@ class MyMHAttention(nn.Module):
         super(MyMHAttention, self).__init__()
         self.pos_enc = PositionalEncoding(d_model=d, max_len=seq_len)
         self.cls_embed = nn.Embedding(1, d)
-        self.mh_layer = torch.nn.TransformerEncoderLayer(d_model=d, nhead=nhead, batch_first=True)
+        self.mh_layer = torch.nn.TransformerEncoderLayer(d_model=d, nhead=nhead)#, batch_first=True)
 
 
     def forward(self, outputs, cls_idxs=None, **kwargs):
@@ -48,8 +48,9 @@ class MyMHAttention(nn.Module):
         # dummy_cls dims: [batch, 1, embed_size]
         outputs = torch.cat((dummy_cls,outputs), dim=1)
         # outputs dims: [batch, time_steps+1, embed_dim]
-        outputs = self.pos_enc(outputs)
-        outputs = self.mh_layer(outputs)[:,0,:]
+        outputs = self.pos_enc(outputs).transpose(0,1)
+        # outputs dims: [ time_steps+1,batch embed_dim]
+        outputs = self.mh_layer(outputs)[0,:,:]
         # outputs dims: [batch, embedding]
         return outputs
 

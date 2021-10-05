@@ -46,21 +46,37 @@ def numbers_to_str(nums, precision=3):
     msg += ')'
     return msg
 
+def can_report_mem_usage():
+    version_pieces = torch.__version__.split(".")
+    if len(version_pieces) < 2:
+        print("Unexpected version formatting from Pytorch. Disabling memory usage display in progress bar")
+        return False
+    try:
+        major = int(version_pieces[0])
+        minor = int(version_pieces[0])
+    except ValueError as e:
+        print("Unexpected version formatting from Pytorch. Disabling memory usage display in progress bar")
+        return False
 
-
-
-def pbar_update(i, updates_per_epoch, loss_meter, update_freq=500, bar_parts=50, aux_losses=None):
-    memr = torch.cuda.max_memory_reserved('cuda')/(2**30)
-    if aux_losses is not None:
-        aux_losses_str = ""
-        for key, val in aux_losses.items():
-            # print("k:", key, "val:", val)
-            aux_losses_str += f"| {key}: {val.item():8.3f} "
+    if major >= 1 and minor >=4:
+        return True
     else:
-        aux_losses_str = "| No Aux Losses "
+        return False
 
+
+def pbar_update(i, updates_per_epoch, loss_meter, update_freq=6000, bar_parts=50, aux_losses=None, report_mem_usage=False):
     if (i+1) % (updates_per_epoch//update_freq) == 0:
-        stat_str = f"{(i+1):>7}/{updates_per_epoch} | Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f} | mem: {memr:5.2f}gb {aux_losses_str}"
+        if aux_losses is not None:
+            aux_losses_str = ""
+            for key, val in aux_losses.items():
+                # print("k:", key, "val:", val)
+                aux_losses_str += f"| {key}: {val.item():8.3f} "
+        else:
+            aux_losses_str = "| No Aux Losses "
+
+        stat_str = f"{(i+1):>7}/{updates_per_epoch} | Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f} {aux_losses_str}"
+        if report_mem_usage:
+            stat_str += f" | mem: {memr:5.2f}gb"
         print(stat_str, end="  |")
         if len(stat_str) > 150: # Don't print compltion bar
             print("\r", end="")
@@ -266,12 +282,19 @@ def multiling_contrastive_computation(image_model, image_input, audio_models:dic
 
         tot_loss = tot_loss + lang_loss
         if args.full_graph: # Get language to language contrastive losses
+            #TODO Make this more efficient
             for j in range(i+1, len(lang_ids)):
                 audio_input = target_audio_input[lang_ids[j]]['lmspecs'], target_audio_input[lang_ids[j]]['nframes']
                 audio_output2 = audio_models[lang_ids[i]](*audio_input)
                 model_outputs.append(audio_output2)
                 lang_loss, al = loss_func(audio_output, audio_output2)
                 tot_loss = tot_loss + lang_loss
+                # Save auxillary losses (for diagnostics/debugging)
+                if lang_aux_losses is None:
+                    aux_losses[lang_ids[i][0]+"_"+lang_ids[j][0]] = lang_loss
+                else:
+                    for al_key in lang_aux_losses.keys():
+                        aux_losses[lang_ids[i][0]+"_"+lang_ids[j][0]+"_"+al_key] = lang_aux_losses[al_key]
 
     return tot_loss, aux_losses, model_outputs
 
@@ -362,6 +385,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
     batch_size = train_loader.batch_size
     tot_size = len(train_loader.dataset)
     batches_per_epoch = len(train_loader)
+    report_mem_usage = can_report_mem_usage()
 
     # Report initial status to user
     epoch += 1
@@ -384,14 +408,13 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         for audio_model in audio_models.values():
             audio_model.train()
         image_model.train()
-
         aux_losses = None
         for i, (image_input, audio_input) in enumerate(train_loader):
             # if i >= 10:
             #     break
-            print(i)
-            if i <= 279:
-                continue
+            # print(i)
+            # if i <= 279:
+            #     continue
             batch_start_time = time.time()
             # Display current progress
 
@@ -403,7 +426,8 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             loss, aux_losses, model_outputs = multiling_contrastive_computation(
                                                             image_model, image_input, audio_models, target_audio_input,
                                                             loss_func, device, args)
-            pbar_update(i, batches_per_epoch, epoch_loss_meter, aux_losses=aux_losses)
+            if not args.no_pbar:
+                pbar_update(i, batches_per_epoch, epoch_loss_meter, aux_losses=aux_losses, report_mem_usage=report_mem_usage)
 
             # Update parameters
             optimizer.zero_grad()

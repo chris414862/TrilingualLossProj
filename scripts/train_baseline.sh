@@ -10,21 +10,26 @@ SCRIPT_DIR=${SCRIPT_DIR%/}
 PROJECT_DIR=${SCRIPT_DIR%/*}
 DATA_TR=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_train_HDF5.json"
 DATA_VAL=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_valid_HDF5.json"
-MODE="train"
 TRAIN_SCRIPT="run_ResDavenet.py"
 
-#### Process optional arguments####
-# If present, we will save output to expdir/file_name.txt
-log_file="" 
-# If present, we will restrict gpu usage
-devs_to_use=""
-# # If present, will dictate which layers get quantized
-# vqon=""    
-# If present, will bypass argument check and directly run $TRAIN_SCRIPT
-skip_arg_check=0
 
-args=( "$@" ) # arguments in bash's array data structure
-extra_args=( ) # args for python training script
+#### Set script defualt arguments
+# Experiment directory
+EXPDIR=$SCRATCH"/exps/FULL_GRAPH_BASELINE"
+# If present, we will save output to expdir/file_name.txt
+LOG_FILE="full_graph_trip_loss_baseline.txt" 
+# If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
+devs_to_use=""
+# If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
+skip_arg_check=1
+
+#### Set python training programs defualt arguments
+extra_args=( "--batch-size=16" "--lr=.002" "--langs=english,japanese,hindi" "--mode=train") 
+extra_args+=("--image-output-head=self_attn" "--audio-output-head=self_attn" "--full-graph") 
+
+# Record arguments in bash's array data structure
+args=( "$@" ) 
+
 part_of_prev=0
 for i in $(seq 0 $# ); do 
     if [[ $part_of_prev -eq 1 ]]; then
@@ -50,11 +55,6 @@ for i in $(seq 0 $# ); do
         devs_to_use=${args[$(($i+1))]}
         part_of_prev=1
 
-    # # Chris Crabtree: Collected to add commas. Not sure why this needed to be done here, but I left it.
-    # elif [[ ${args[$i]} == "--vqon" ]]; then
-    #     vqon=${args[$(($i+1))]}
-    #     vqonarg=$(echo $vqon | sed 's/./&,/g' | sed 's/,$//g')  # insert ',' in between
-    #     part_of_prev=1
 
     # exp-dir is collected for display purposes. Will be sent as-is to $TRAIN_SCRIPT
     elif [[ ${args[$i]} == "--exp-dir" ]]; then
@@ -67,23 +67,24 @@ for i in $(seq 0 $# ); do
 done
 
 #### Set defaults if not found
-# if [[ -z "$vqon" ]]; then
-#     # Chris Crabtree: preserving most of the original logic
-#     vqon="00000"
-#     vqonarg=$(echo $vqon | sed 's/./&,/g' | sed 's/,$//g')  # insert ',' in between
-#     echo "WARNING: --vqon argument not found. "
-#     echo "         Setting to $vqon"
-# fi
 if [[ -z "$expdir" ]]; then
+    expdir=$EXPDIR
     echo "WARNING: --exp-dir argument not found."
-    echo "         Experiment data will be placed in $PROJECT_DIR"
-    expdir=$PROJECT_DIR
+    echo "          Experiment data will be placed in $expdir"
+fi
+if [[ -z "$log_file" ]]; then
+
+    echo "WARNING: --log argument not found."
+    if [[ -n "$LOG_FILE" ]]; then
+        log_file=$LOG_FILE
+        echo "          Using default log file name: $log_file"
+    fi
 
 fi
 if [[ -z "$devs_to_use" ]]; then
-    devs_to_use="0,1,2,3,4,5,6,7"
+    devs_to_use=""
     echo "WARNING: --gpus argument not found."
-    echo "         Using all available GPUs: $devs_to_use"
+    echo "         Using all available GPUs."
 fi
 
 #### Extra preprocessing
@@ -118,7 +119,7 @@ fi
 if [[ -n "$log_file" ]]; then
     printf "$fmt_str" "Log file:" "$log_file"
 else
-    printf "$fmt_str" "%-25s%s\n" "Log file:" "None given. No logging will be performed"
+    printf "$fmt_str" "Log file:" "None given"
 fi
 
 echo ""
@@ -149,22 +150,24 @@ if [[ "$skip_arg_check" -ne 1 ]]; then
     echo "---------------------------------------------------------------"
 fi
 
-# Make experiment directory
-mkdir "$expdir"
 
 #### Run $TRAIN_SCRIPT
 # Current script is expected to be in parent_dir($TRAIN_SCRIPT)/scripts/
-run_command="python $SCRIPT_DIR/../$TRAIN_SCRIPT --mode $MODE \
+run_command="python $SCRIPT_DIR/../$TRAIN_SCRIPT \
             --exp-dir $expdir \
             --data-train $DATA_TR --data-val $DATA_VAL ${extra_args[@]}"
 
 # Set available GPUs
-export CUDA_VISIBLE_DEVICES=$devs_to_use  
+if [[ -n "$devs_to_use" ]]; then 
+    export CUDA_VISIBLE_DEVICES=$devs_to_use  
+fi
 if [[ -z "$log_file" ]]; then
     # No double quotes around $run_command bc bash will interpret  
     # that as one long word and not be able to find that command 
     $run_command 
 else
+    ## Make experiment directory so that log file can be tee'd to
+    mkdir -p "$expdir"
     # Send all output to tee so output is displayed on terminal
     # as well as $log_file
     $run_command 2>&1 | tee "$log_file"
