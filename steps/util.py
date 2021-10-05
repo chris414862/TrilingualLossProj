@@ -9,6 +9,7 @@ import torch.nn as nn
 from collections import defaultdict
 
 
+
 def calc_recalls(S, view1="", view2=""):
     """
     Computes recall at 1, 5, and 10 given a similarity matrix S.
