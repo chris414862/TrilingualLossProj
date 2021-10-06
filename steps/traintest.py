@@ -8,6 +8,7 @@ import time
 import torch
 import torch.nn as nn
 import sys
+import os
 import re
 import pprint
 import pandas as pd
@@ -16,7 +17,7 @@ from models.quantizers import compute_perplexity
 from .util import *
 from .util2 import InfoNCE_loss
 from math import ceil
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, OrderedDict
 
 
 def flprint(*args, **kwargs):
@@ -64,29 +65,45 @@ def can_report_mem_usage():
         return False
 
 
-def pbar_update(i, updates_per_epoch, loss_meter, update_freq=6000, bar_parts=50, aux_losses=None, report_mem_usage=False):
-    if (i+1) % (updates_per_epoch//update_freq) == 0:
+def pbar_update(i, updates_per_epoch, loss_meter, update_every=5, bar_parts=50, aux_losses=None, report_mem_usage=False):
+    if  i % update_every  == 0:
+        cols = 100
+        prefix_str = f"{(i+1):>7}/{updates_per_epoch} "
+        stat_lines = [f"{prefix_str}| Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f}"]
         if aux_losses is not None:
-            aux_losses_str = ""
             for key, val in aux_losses.items():
-                # print("k:", key, "val:", val)
-                aux_losses_str += f"| {key}: {val.item():8.3f} "
-        else:
-            aux_losses_str = "| No Aux Losses "
+                curr_stat_line = stat_lines.pop(-1)
+                new_str = f"| {key}: {val.item():8.3f} "
+                if len(curr_stat_line + new_str) > cols:
+                    stat_lines.append(curr_stat_line)
+                    stat_lines.append(" "*len(prefix_str)+new_str)
+                else:
+                    stat_lines.append(curr_stat_line+new_str)
 
-        stat_str = f"{(i+1):>7}/{updates_per_epoch} | Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f} {aux_losses_str}"
+
         if report_mem_usage:
-            stat_str += f" | mem: {memr:5.2f}gb"
-        print(stat_str, end="  |")
-        if len(stat_str) > 150: # Don't print compltion bar
-            print("\r", end="")
-        else:
-            parts_done = int((i+1)/updates_per_epoch*bar_parts)
-            parts_togo = int((updates_per_epoch-i-1)/updates_per_epoch*bar_parts)
-            print("-"*parts_done+">"+" "*parts_togo+"|", end="\r", flush=True)
+            curr_stat_line = stat_lines.pop(-1)
+            new_str = f" | mem: {memr:5.2f}gb"
+            if len(curr_stat_line + new_str) > cols:
+                stat_lines.append(curr_stat_line)
+                stat_lines.append(" "*len(prefix_str)+new_str)
+            else:
+                stat_lines.append(curr_stat_line+new_str)
+
+        for stat_line in stat_lines:
+            print(stat_line)
+        parts_done = int((i+1)/updates_per_epoch*bar_parts)
+        parts_togo = int((updates_per_epoch-i-1)/updates_per_epoch*bar_parts)
+        print(" "*len(prefix_str)+"|"+"-"*parts_done+">"+" "*parts_togo+"|", flush=True)
+        tot_lines = len(stat_lines)+2
+        print(f"\x1B[{tot_lines}A")
 
 
-def mid_epoch_training_report(epoch, batches_per_epoch,loss_meter, epoch_loss_meter, i, batch_timer, epoch_time_elapsed, tot_time, args):
+def mid_epoch_training_report(epoch, batches_per_epoch, loss_meter,
+                              epoch_loss_meter, i, batch_timer,
+                              epoch_time_elapsed, tot_time, 
+                              args):
+
     print('Epoch: [{0}][{1}/{2}]'
           '  Batch time={bt.val:.1f} ({bt.avg:.1f})'
           '  Epoch time={et}s'
@@ -248,7 +265,24 @@ def get_target_multiling_data(full_audio_input, device, args):
 
     return target_audio_input
 
+def store_aux_losses(lang_loss=None, lang_aux_losses=None, aux_losses=None, lang_ids=None, idxs=None):
+    # Create key that will be displayed by pbar
+    lang_ids_key = ""
+    for idx in idxs:
+        lang_ids_key += lang_ids[idx][:3] +"_"
+    if len(idxs) <= 1: # paired with image modality
+        lang_ids_key += "img"
+    else:
+        lang_ids_key = lang_ids_key[:-1]
 
+    # Don't store if monolingual
+    if len(lang_ids) > 1:
+        aux_losses[lang_ids_key] = lang_loss
+
+    # Store additional auxillary losses
+    if lang_aux_losses is not None:
+        for al_key in lang_aux_losses.keys():
+            aux_losses[lang_ids_key+"_"+al_key] = lang_aux_losses[al_key]
 
 def multiling_contrastive_computation(image_model, image_input, audio_models:dict, target_audio_input, loss_func, device, args):
     '''
@@ -259,42 +293,38 @@ def multiling_contrastive_computation(image_model, image_input, audio_models:dic
             batch_loss: torch.Tenser - loss for the batch. Size is []. I.e the loss is a scalar
     '''
 
-    model_outputs = [] # save outputs for explicit deletion later
+    model_outputs = dict() # save outputs for explicit deletion later
     image_output = image_model(image_input)
     # image dims: [batch, embed_dim]
-    model_outputs.append(image_output)
+    model_outputs['image'] = image_output
+
+    # Get output for each language
     lang_ids = [k for k in target_audio_input.keys()]
-    tot_loss = 0.0
-    aux_losses = dict() if len(lang_ids) >= 1 else None
-    for i in range(len(lang_ids)):
-        audio_input = target_audio_input[lang_ids[i]]['lmspecs'], target_audio_input[lang_ids[i]]['nframes']
-        audio_output = audio_models[lang_ids[i]](*audio_input)
+    for lang_id in lang_ids:
+        audio_input = target_audio_input[lang_id]['lmspecs'], target_audio_input[lang_id]['nframes']
+        audio_output = audio_models[lang_id](*audio_input)
         # audio dims: [batch, embed_dim]
-        model_outputs.append(audio_output)
-        lang_loss, lang_aux_losses = loss_func(image_output, audio_output, debug=True)
+        model_outputs[lang_id] = audio_output
+
+    # compute audio-image pairs
+    tot_loss = 0.0
+    aux_losses = OrderedDict() #if len(lang_ids) >= 1 else None
+    for i in range(len(lang_ids)):
+        lang_loss, lang_aux_losses = loss_func(model_outputs['image'], model_outputs[lang_ids[i]])#, debug=True)
+        tot_loss = tot_loss + lang_loss
 
         # Save auxillary losses (for diagnostics/debugging)
-        if lang_aux_losses is None:
-            aux_losses[lang_ids[i]] = lang_loss
-        else:
-            for al_key in lang_aux_losses.keys():
-                aux_losses[lang_ids[i]+"_"+al_key] = lang_aux_losses[al_key]
+        store_aux_losses(lang_loss=lang_loss, lang_aux_losses=lang_aux_losses, aux_losses=aux_losses, lang_ids=lang_ids, idxs=[i])
 
-        tot_loss = tot_loss + lang_loss
-        if args.full_graph: # Get language to language contrastive losses
-            #TODO Make this more efficient
+    # Get language to language contrastive losses
+    if args.full_graph:
+        for i in range(len(lang_ids)):
             for j in range(i+1, len(lang_ids)):
-                audio_input = target_audio_input[lang_ids[j]]['lmspecs'], target_audio_input[lang_ids[j]]['nframes']
-                audio_output2 = audio_models[lang_ids[i]](*audio_input)
-                model_outputs.append(audio_output2)
-                lang_loss, al = loss_func(audio_output, audio_output2)
+                lang_loss, al = loss_func(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]])
                 tot_loss = tot_loss + lang_loss
+
                 # Save auxillary losses (for diagnostics/debugging)
-                if lang_aux_losses is None:
-                    aux_losses[lang_ids[i][0]+"_"+lang_ids[j][0]] = lang_loss
-                else:
-                    for al_key in lang_aux_losses.keys():
-                        aux_losses[lang_ids[i][0]+"_"+lang_ids[j][0]+"_"+al_key] = lang_aux_losses[al_key]
+                store_aux_losses(lang_loss=lang_loss, lang_aux_losses=lang_aux_losses, aux_losses=aux_losses, lang_ids=lang_ids, idxs=[i,j])
 
     return tot_loss, aux_losses, model_outputs
 
@@ -427,7 +457,11 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
                                                             image_model, image_input, audio_models, target_audio_input,
                                                             loss_func, device, args)
             if not args.no_pbar:
-                pbar_update(i, batches_per_epoch, epoch_loss_meter, aux_losses=aux_losses, report_mem_usage=report_mem_usage)
+                pbar_update( i,
+                             batches_per_epoch,
+                             epoch_loss_meter,
+                             aux_losses=aux_losses,
+                             report_mem_usage=report_mem_usage)
 
             # Update parameters
             optimizer.zero_grad()
@@ -445,7 +479,10 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             if (global_step) % args.n_print_steps == 0:
                 epoch_time = time.time()-epoch_start_time
                 tot_time = time.time()-start_time
-                mid_epoch_training_report(epoch, batches_per_epoch,loss_meter, epoch_loss_meter, i, batch_timer, epoch_time, tot_time, args)
+                mid_epoch_training_report(epoch, batches_per_epoch, loss_meter,
+                                          epoch_loss_meter, i, batch_timer,
+                                          epoch_time, tot_time, 
+                                          args)
 
             # Chech if training went off the rails
             if np.isnan(loss_meter.avg):
@@ -457,7 +494,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             if aux_losses is not None:
                 for al in aux_losses:
                     del al
-            for output in model_outputs:
+            for output in model_outputs.values():
                 del output
 
 
@@ -485,7 +522,8 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         save_state_and_progress(exp_dir, image_model, audio_models, optimizer, epoch, progress_df,
                    is_best_acc=(epoch == best_epoch), args=args)
 
-        print('TRAINER: Finished epoch %d. Time elapsed in epoch = %.fs. Average epoch time = %.fs. Total time elapsed = %.fs. Current Time = %s' % (
+        print('TRAINER: Finished epoch %d. Time elapsed in epoch = %.fs. Average epoch time = %.fs. '
+              'Total time elapsed = %.fs. Current Time = %s' % (
               epoch, epoch_timer.val, epoch_timer.avg, total_time_elapsed, datetime.datetime.now()))
         epoch += 1
 

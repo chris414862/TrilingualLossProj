@@ -4,13 +4,6 @@
 # Augmented by: Chris Crabtree
 
 
-#### Set script constants
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-SCRIPT_DIR=${SCRIPT_DIR%/}
-PROJECT_DIR=${SCRIPT_DIR%/*}
-DATA_TR=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_train_HDF5.json"
-DATA_VAL=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_valid_HDF5.json"
-TRAIN_SCRIPT="run_ResDavenet.py"
 
 
 #### Set script defualt arguments
@@ -19,17 +12,26 @@ EXPDIR=$SCRATCH"/exps/FULL_GRAPH_BASELINE"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="full_graph_trip_loss_baseline.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use=""
+devs_to_use="7"
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
-skip_arg_check=1
+skip_arg_check=0
 
 #### Set python training programs defualt arguments
 extra_args=( "--batch-size=16" "--lr=.002" "--langs=english,japanese,hindi" "--mode=train") 
 extra_args+=("--image-output-head=self_attn" "--audio-output-head=self_attn" "--full-graph") 
 
+
+#### Set script constants
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR=${SCRIPT_DIR%/}
+PROJECT_DIR=${SCRIPT_DIR%/*}
+DATA_TR=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_train_HDF5.json"
+DATA_VAL=$PROJECT_DIR"/data/TrilingualData/hdf5/metadata/trilingual_valid_HDF5.json"
+TRAIN_SCRIPT="run_ResDavenet.py"
+
+#### Retrieve arguments from command line
 # Record arguments in bash's array data structure
 args=( "$@" ) 
-
 part_of_prev=0
 for i in $(seq 0 $# ); do 
     if [[ $part_of_prev -eq 1 ]]; then
