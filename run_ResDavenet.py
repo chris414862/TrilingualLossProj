@@ -183,7 +183,7 @@ def get_train_parser(parser=None):
             help='Use dev set for evaluation, rather than test set. '+
             f'Must give integer to specify dev set size.')
     parser.add_argument('--loss', type=str, default='multiview_coding',
-            choices=['multiview_coding','hyperspheric', 'masked_margin_sm'],
+            choices=['triplet', 'triplet_w_hardneg','multiview_coding','hyperspheric', 'masked_margin_sm'],
             help='Loss function to use')
     parser.add_argument('--full-graph', action="store_true",
             help='Use every modality pair for contrastive loss (rather than using images as the anchor)')

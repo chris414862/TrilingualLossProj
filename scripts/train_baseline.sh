@@ -14,11 +14,12 @@ LOG_FILE="full_graph_trip_loss_baseline.txt"
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
 devs_to_use="7"
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
-skip_arg_check=0
+skip_arg_check=1
 
 #### Set python training programs defualt arguments
 extra_args=( "--batch-size=16" "--lr=.002" "--langs=english,japanese,hindi" "--mode=train") 
 extra_args+=("--image-output-head=self_attn" "--audio-output-head=self_attn" "--full-graph") 
+extra_args+=("--loss=triplet_w_hardneg" ) 
 
 
 #### Set script constants

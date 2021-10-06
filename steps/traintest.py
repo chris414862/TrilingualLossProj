@@ -71,14 +71,20 @@ def pbar_update(i, updates_per_epoch, loss_meter, update_every=5, bar_parts=50, 
         prefix_str = f"{(i+1):>7}/{updates_per_epoch} "
         stat_lines = [f"{prefix_str}| Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f}"]
         if aux_losses is not None:
-            for key, val in aux_losses.items():
-                curr_stat_line = stat_lines.pop(-1)
-                new_str = f"| {key}: {val.item():8.3f} "
-                if len(curr_stat_line + new_str) > cols:
-                    stat_lines.append(curr_stat_line)
-                    stat_lines.append(" "*len(prefix_str)+new_str)
-                else:
-                    stat_lines.append(curr_stat_line+new_str)
+            for view_pair_key, loss_dict in aux_losses.items():
+                for loss_type, loss_val in loss_dict.items():
+                    curr_stat_line = stat_lines.pop(-1)
+                    if loss_type.strip() == "total": # New view pair always gets a new line
+                        new_str = f"| {view_pair_key}: {loss_val.item():8.3f} "
+                        stat_lines.append(curr_stat_line)
+                        stat_lines.append(" "*len(prefix_str)+new_str)
+                    else:
+                        new_str = f"| {view_pair_key+'_'+loss_type}: {loss_val.item():8.3f} "
+                        if len(curr_stat_line + new_str) > cols:
+                            stat_lines.append(curr_stat_line)
+                            stat_lines.append(" "*len(prefix_str)+new_str)
+                        else:
+                            stat_lines.append(curr_stat_line+new_str)
 
 
         if report_mem_usage:
@@ -265,7 +271,7 @@ def get_target_multiling_data(full_audio_input, device, args):
 
     return target_audio_input
 
-def store_aux_losses(lang_loss=None, lang_aux_losses=None, aux_losses=None, lang_ids=None, idxs=None):
+def store_aux_losses(lang_loss=None, pair_aux_losses=None, total_losses=None, lang_ids=None, idxs=None):
     # Create key that will be displayed by pbar
     lang_ids_key = ""
     for idx in idxs:
@@ -277,12 +283,12 @@ def store_aux_losses(lang_loss=None, lang_aux_losses=None, aux_losses=None, lang
 
     # Don't store if monolingual
     if len(lang_ids) > 1:
-        aux_losses[lang_ids_key] = lang_loss
+        total_losses[lang_ids_key] = {"total":lang_loss}
 
     # Store additional auxillary losses
-    if lang_aux_losses is not None:
-        for al_key in lang_aux_losses.keys():
-            aux_losses[lang_ids_key+"_"+al_key] = lang_aux_losses[al_key]
+    if pair_aux_losses is not None: 
+        for al_key in pair_aux_losses.keys():
+            total_losses[lang_ids_key][al_key] = pair_aux_losses[al_key]
 
 def multiling_contrastive_computation(image_model, image_input, audio_models:dict, target_audio_input, loss_func, device, args):
     '''
@@ -308,30 +314,34 @@ def multiling_contrastive_computation(image_model, image_input, audio_models:dic
 
     # compute audio-image pairs
     tot_loss = 0.0
-    aux_losses = OrderedDict() #if len(lang_ids) >= 1 else None
+    tot_aux_losses = OrderedDict() #if len(lang_ids) >= 1 else None
     for i in range(len(lang_ids)):
-        lang_loss, lang_aux_losses = loss_func(model_outputs['image'], model_outputs[lang_ids[i]])#, debug=True)
+        lang_loss, pair_aux_losses = loss_func(model_outputs['image'], model_outputs[lang_ids[i]])#, debug=True)
         tot_loss = tot_loss + lang_loss
 
         # Save auxillary losses (for diagnostics/debugging)
-        store_aux_losses(lang_loss=lang_loss, lang_aux_losses=lang_aux_losses, aux_losses=aux_losses, lang_ids=lang_ids, idxs=[i])
+        store_aux_losses(lang_loss=lang_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i])
 
     # Get language to language contrastive losses
     if args.full_graph:
         for i in range(len(lang_ids)):
             for j in range(i+1, len(lang_ids)):
-                lang_loss, al = loss_func(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]])
+                pair_loss, pair_al = loss_func(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]])
                 tot_loss = tot_loss + lang_loss
 
                 # Save auxillary losses (for diagnostics/debugging)
-                store_aux_losses(lang_loss=lang_loss, lang_aux_losses=lang_aux_losses, aux_losses=aux_losses, lang_ids=lang_ids, idxs=[i,j])
+                store_aux_losses(lang_loss=pair_loss, pair_aux_losses=pair_al, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i,j])
 
-    return tot_loss, aux_losses, model_outputs
+    return tot_loss, tot_aux_losses, model_outputs
 
 
 def get_loss_function(args):
     if args.loss == "multiview_coding":
         return MultiViewCodingLoss(temperature=args.temperature, sim_measure=args.sim_measure)
+    elif args.loss == 'triplet':
+        return TripletLoss(margin=args.margin) 
+    elif args.loss == 'triplet_w_hardneg':
+        return TripletLoss(margin=args.margin, use_hard_neg=True)
     elif args.loss == "hyperspheric":
         return HypersphericLoss(alpha=args.hsphere_alpha, t=args.hsphere_t, lam=args.hsphere_lam)
     elif args.loss == "masked_margin_sm":
