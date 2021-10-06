@@ -88,7 +88,7 @@ class ResDavenet(nn.Module):
         if self.output_head_str == "avg":
             # self.pool_func = nn.AdaptiveAvgPool2d((1, 1))
             self.head_layer = self.avg_output
-        elif self.output_head_str == "self_attn":
+        elif self.output_head_str == "transformer":
             self.head_layer = MyMHAttention(layer_widths[-1], nhead=8, seq_len=500)
 
     def _make_layer(self, block, planes, blocks, width=9, stride=1):

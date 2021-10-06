@@ -17,9 +17,9 @@ devs_to_use="7"
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
-extra_args=( "--batch-size=16" "--lr=.002" "--langs=english,japanese,hindi" "--mode=train") 
-extra_args+=("--image-output-head=self_attn" "--audio-output-head=self_attn" "--full-graph") 
-extra_args+=("--loss=triplet_w_hardneg" ) 
+extra_args=( "--batch-size=128" "--lr=.001" "--langs=english,japanese,hindi" "--mode=train") 
+extra_args+=("--image-output-head=avg" "--audio-output-head=avg" "--full-graph") 
+extra_args+=("--n-epochs=75" "--loss=multiview_coding" ) 
 
 
 #### Set script constants

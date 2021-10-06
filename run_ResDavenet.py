@@ -131,14 +131,14 @@ def get_default_parser(parser=None):
     # parser.add_argument('--jitter', type=float, default=0.12, 
     #         help='Temporal jitter probability (equal for both left and right)')
     parser.add_argument('--image-output-head', default="avg", 
-            choices=['avg', 'self_attn', 'custom_self_attn'],
+            choices=['avg', 'transformer', 'custom_self_attn'],
             help='Head layer to use to get single vector representation of the image model. '+
-                 'Options: ["avg", "self_attn", "custom_self_attn"]. '+
+                 'Options: ["avg", "transformer", "custom_self_attn"]. '+
                  'Default: "avg"')
     parser.add_argument('--audio-output-head', default="avg", 
-            choices=['avg', 'self_attn', 'custom_self_attn'],
+            choices=['avg', 'transformer', 'custom_self_attn'],
             help='Head layer to use to get single vector representation of the audio model. '+
-                 'Options: ["avg", "self_attn", "custom_self_attn"]. '+
+                 'Options: ["avg", "transformer", "custom_self_attn"]. '+
                  'Default: "avg"')
 
 

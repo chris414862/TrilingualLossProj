@@ -64,7 +64,7 @@ class Resnet50(imagemodels.ResNet):
         # self.pool_func = nn.AdaptiveAvgPool2d((1, 1))
         if self.output_head_str == "avg":
             self.head_layer = self.avg_output
-        elif self.output_head_str == "self_attn":
+        elif self.output_head_str == "transformer":
             self.head_layer = MyMHAttention(embedding_dim, nhead=8, seq_len=50)
         # elif self.output_head == "custom_self_attn":
         #     self.residual_output = True
