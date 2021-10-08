@@ -8,18 +8,18 @@
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR=$SCRATCH"/exps/FULL_GRAPH_BASELINE"
+EXPDIR=$SCRATCH"/exps/MV_CODING_MH_ATTN_LR001"
 # If present, we will save output to expdir/file_name.txt
-LOG_FILE="full_graph_trip_loss_baseline.txt" 
+LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="7"
+devs_to_use="1,2"
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
-extra_args=( "--batch-size=128" "--lr=.001" "--langs=english,japanese,hindi" "--mode=train") 
-extra_args+=("--image-output-head=transformer" "--audio-output-head=transformer" "--full-graph") 
-extra_args+=("--n-epochs=75" "--loss=multiview_coding" ) 
+extra_args=( "--batch-size=128" "--lr=.001" "--mode=train" "--langs=english,japanese,hindi")
+extra_args+=("--image-output-head=mh_attn" "--audio-output-head=mh_attn" "--full-graph") 
+extra_args+=("--n-epochs=75" "--loss=multiview_coding" "--lr-ramp=.1" "--no-pbar") 
 
 #### Set script constants
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"

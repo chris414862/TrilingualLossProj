@@ -123,9 +123,9 @@ class TripletLoss(nn.Module):
 
 def cosine_sim_matrix(view1, view2, epsilon=1e-8, debug=False):
     # view1, view2 dims: [batch,embed_size]
-    view1_norm = torch.linalg.vector_norm(view1, ord=2, dim=1, keepdim=True)
+    view1_norm = torch.norm(view1, p=None, dim=1, keepdim=True)
     # view1_norm dims: [batch, 1]
-    view2_norm = torch.linalg.vector_norm(view2, ord=2, dim=1, keepdim=True)
+    view2_norm = torch.norm(view2, p=None, dim=1, keepdim=True)
     # view2_norm dims: [batch, 1]
     
     dot_sim = torch.mm(view1, view2.transpose(0,1))
@@ -201,6 +201,7 @@ class MultiViewCodingLoss(nn.Module):
             mask: ( torch.Tensor ) 
                 Shape=[batch,embed_size]
         """
+        aux_losses = dict()
         density_ratios = self.den_ratio_func(view1, view2)#, debug=kwargs['debug'])
         density_ratios = density_ratios/self.tao
         # print("density_ratios", density_ratios, density_ratios.shape) if kwargs['debug'] else ""
@@ -221,6 +222,8 @@ class MultiViewCodingLoss(nn.Module):
 
         # batch scale
         loss = loss/correct.size(0)
+        aux_losses["1->2"] = loss
+
 
         
         # ## View 2 as anchor
@@ -233,9 +236,10 @@ class MultiViewCodingLoss(nn.Module):
         # print("loss 2") if kwargs['debug'] else ""
         # print(loss2) if kwargs['debug'] else ""
 
+        aux_losses["2->1"] = loss2
         loss = loss + loss2
         auxillary_losses = None
-        return loss, auxillary_losses
+        return loss, aux_losses
 
     
 
@@ -310,12 +314,42 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-def adjust_learning_rate(base_lr, lr_decay, lr_decay_multiplier, optimizer, epoch):
+
+def get_lr_steps_from_str(lr, lr_ramp, total_steps):
+    try:
+        lr_ramp_steps = int(lr_ramp)
+        return lr_ramp_steps
+    except ValueError as e:
+        pass
+
+    try:
+        lr_ramp_pct = float(lr_ramp)
+        if 0.0 <= lr <= 1.0:
+            return int(lr_ramp_pct*total_steps)
+
+    except ValueError as e:
+        raise ValueError("--lr-ramp must either be a positive integer or a float between .0 and 1.0.")
+
+def adjust_learning_rate(base_lr, lr_ramp, lr_decay, lr_decay_multiplier, optimizer, global_step, total_steps):
     """Sets the learning rate to the initial LR decayed every lr_decay epochs"""
-    lr = base_lr * (lr_decay_multiplier ** (epoch // lr_decay))
+    lr_ramp_steps = get_lr_steps_from_str(base_lr, lr_ramp, total_steps)
+
+    if global_step < lr_ramp_steps:
+        lr = base_lr * (global_step / lr_ramp_steps)
+    else:
+        lr = base_lr * (lr_decay_multiplier ** ((global_step - lr_ramp_steps) // lr_decay))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     return lr
+
+
+# def adjust_learning_rate(base_lr, lr_decay, lr_decay_multiplier, optimizer, epoch):
+#     """Sets the learning rate to the initial LR decayed every lr_decay epochs"""
+#
+#     lr = base_lr * (lr_decay_multiplier ** (epoch // lr_decay))
+#     for param_group in optimizer.param_groups:
+#         param_group['lr'] = lr
+#     return lr
 
 def load_progress(prog_pkl, quiet=False):
     """

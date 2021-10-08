@@ -8,18 +8,18 @@
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR=$SCRATCH"/exps/MV_CODING_AVG_HEAD"
+EXPDIR=$SCRATCH"/exps/TRIPLET_W_HARDNEG_TRANSF_HEAD"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="6,7"
+devs_to_use=""
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
-extra_args=( "--batch-size=128" "--lr=.001" "--langs=english,japanese,hindi" "--mode=train") 
-extra_args+=("--image-output-head=avg" "--audio-output-head=avg" "--full-graph") 
-extra_args+=("--n-epochs=75" "--loss=multiview_coding" "--lr-ramp=.1" "--no-pbar") 
+extra_args=( "--batch-size=128" "--lr=.0002" "--langs=english,japanese,hindi" "--mode=train") 
+extra_args+=("--image-output-head=transformer" "--audio-output-head=transformer" "--full-graph") 
+extra_args+=("--n-epochs=100" "--loss=triplet_w_hardneg" "--lr-ramp=.1" "--no-pbar" ) 
 
 
 #### Set script constants

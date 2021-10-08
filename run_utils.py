@@ -32,7 +32,7 @@ def create_audio_model(audio_model_name, feat_dim,
                        # VQ_turnon, 
                        convsize, 
                        # VQ_commitment_cost, jitter, init_ema_mass, init_std, nonneg_init, 
-                       output_head):
+                       output_head, no_scale_pe):
     layer_widths = [int(w) for w in layer_widths.split(',')]
     layer_depths = [int(w) for w in layer_depths.split(',')]
 
@@ -56,7 +56,8 @@ def create_audio_model(audio_model_name, feat_dim,
                                  layers=layer_depths,
                                  layer_widths=layer_widths,
                                  convsize=convsize,
-                                 output_head=output_head)
+                                 output_head=output_head,
+                                 scale_pe= not no_scale_pe)
 
     else:
         raise ValueError('Unknown audio model: %s' % audio_model_name)
@@ -64,9 +65,10 @@ def create_audio_model(audio_model_name, feat_dim,
     return audio_model
 
 
-def create_image_model(image_model_name, pretrained_image_model, output_head):
+def create_image_model(image_model_name, pretrained_image_model, output_head, no_scale_pe):
     if image_model_name == 'Resnet50':
-        image_model = Resnet50(pretrained=pretrained_image_model, output_head=output_head)
+        image_model = Resnet50(pretrained=pretrained_image_model, output_head=output_head,
+                                 scale_pe=not no_scale_pe)
     else:
         raise ValueError('Unknown image model: %s' % image_model_name)
 

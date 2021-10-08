@@ -131,15 +131,16 @@ def get_default_parser(parser=None):
     # parser.add_argument('--jitter', type=float, default=0.12, 
     #         help='Temporal jitter probability (equal for both left and right)')
     parser.add_argument('--image-output-head', default="avg", 
-            choices=['avg', 'transformer', 'custom_self_attn'],
+            choices=['avg', 'mh_attn', 'custom_self_attn'],
             help='Head layer to use to get single vector representation of the image model. '+
-                 'Options: ["avg", "transformer", "custom_self_attn"]. '+
+                 'Options: ["avg", "mh_attn", "custom_self_attn"]. '+
                  'Default: "avg"')
     parser.add_argument('--audio-output-head', default="avg", 
-            choices=['avg', 'transformer', 'custom_self_attn'],
+            choices=['avg', 'mh_attn', 'custom_self_attn'],
             help='Head layer to use to get single vector representation of the audio model. '+
-                 'Options: ["avg", "transformer", "custom_self_attn"]. '+
+                 'Options: ["avg", "mh_attn", "custom_self_attn"]. '+
                  'Default: "avg"')
+    parser.add_argument('--no-scale-pe', action="store_true")
 
 
 
@@ -158,12 +159,17 @@ def get_train_parser(parser=None):
             help='mini-batch size')
     parser.add_argument('--lr', type=float, default=2e-4, metavar='LR', 
             help='initial learning rate')
-    parser.add_argument('--lr-decay', type=int, default=3, metavar='LRDECAY',
+
+    parser.add_argument('--lr-ramp', default="0.0", metavar='LRRAMP',
+            help=('Ramp up learning rate. If int, will ramp over this many steps. '+
+                  'If float between 0 and 1, will ramp over percent of total steps.' ))
+    parser.add_argument('--lr-decay', type=int, default=50, metavar='LRDECAY',
             help=('Multiply the learning rate by lr-decay-multiplier every lr-decay'
-                  ' number of epochs'))
-    parser.add_argument('--lr-decay-multiplier', type=float, default=0.95,
+                  ' number of training steps'))
+    parser.add_argument('--lr-decay-multiplier', type=float, default=0.99,
             metavar='LRDECAYMULT',
             help='Multiply the learning rate by this factor every lr-decay epochs')
+
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
             help='momentum')
     parser.add_argument('--weight-decay', type=float, default=5e-7, metavar='W', 
@@ -276,8 +282,9 @@ if __name__ == '__main__':
                 # args.VQ_turnon, 
                 args.convsize, 
                 # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
-                args.audio_output_head)
-    image_model = create_image_model(args.image_model, args.pretrained_image_model, args.image_output_head)
+                args.audio_output_head,
+                args.no_scale_pe)
+    image_model = create_image_model(args.image_model, args.pretrained_image_model, args.image_output_head, args.no_scale_pe)
     
     image_model_input, audio_model_input_dict = train_dset.__getitem__(0)
     audio_model_input_shape = audio_model_input_dict["english"]["lmspecs"].shape #this doesn't include batch dimension

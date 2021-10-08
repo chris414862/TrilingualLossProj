@@ -7,50 +7,76 @@ import numpy as np
 
 class PositionalEncoding(nn.Module):
 
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500, scaled=True):
         super().__init__()
         self.d_model = d_model
         self.dropout = nn.Dropout(p=dropout)
-        self.position = torch.arange(max_len).unsqueeze(1).type(torch.float)
-        self.div_term = torch.exp(torch.arange(0, self.d_model, 2).type(torch.float).unsqueeze(0)*(-math.log(10000.0) / self.d_model))
+
+        # Unsqueeze the second dimension for the outer product
+        position = torch.arange(max_len).unsqueeze(1).type(torch.float)
+        # position dims: [max_len, 1]
+
+        div_term = torch.exp(torch.arange(0, self.d_model, 2).type(torch.float).unsqueeze(0)*(-math.log(10000.0) / self.d_model))
+        # div_term dims: [1, d_model/2]
+
+        # 1 is for the batch dimension
         self.pe = nn.Parameter(torch.zeros(1, max_len, self.d_model, requires_grad=False), requires_grad=False)
-        raw_positions = torch.mm(self.position, self.div_term)
-        self.pe[0, :, 0::2] = self.pe[0, :, 0::2] + torch.sin(raw_positions)
-        self.pe[0, :, 1::2] = self.pe[0, :, 1::2] + torch.cos(raw_positions)
+        # self.pe dims: [1, max_len, d_model]
+
+        raw_positions = torch.mm(position, div_term)
+        # raw_positions dims: [max_len, d_model/2]
+
+        if scaled:
+            scale = 1/math.sqrt(self.d_model)
+        else:
+            scale = 1
+        self.pe[0, :, 0::2] = self.pe[0, :, 0::2] + torch.sin(raw_positions)*scale
+        self.pe[0, :, 1::2] = self.pe[0, :, 1::2] + torch.cos(raw_positions)*scale
+        # self.pe dimes: [1, max_len, d_model]
 
     def forward(self, x):
         """
         Args:
             x: Tensor, shape [ batch_size, seq_len, embedding_dim]
         """
-        # x = math.sqrt(self.d_model)*x + self.pe[:,:x.size(1)].to(x.device)
-        x =x + self.pe[:,:x.size(1)].to(x.device)
+        x =x + self.pe[:,:x.size(1)]
         return self.dropout(x)
 
 
 class MyMHAttention(nn.Module):
 
-    def __init__(self, d, nhead, seq_len):
+    def __init__(self, d, nhead, seq_len, scale_pe):
         super(MyMHAttention, self).__init__()
-        self.pos_enc = PositionalEncoding(d_model=d, max_len=seq_len)
+        self.pos_enc = PositionalEncoding(d_model=d, max_len=seq_len, scaled=scale_pe)
         self.cls_embed = nn.Embedding(1, d)
-        self.mh_layer = torch.nn.TransformerEncoderLayer(d_model=d, nhead=nhead)#, batch_first=True)
+        # self.mh_layer = torch.nn.MultiheadAttention(d_model=d, nhead=nhead)#, batch_first=True)
+        self.mh_layer = torch.nn.MultiheadAttention(d, nhead)#, batch_first=True)
+        self.bn_final = nn.BatchNorm1d(1024)
+        self.ln_final = nn.LayerNorm(1024)
 
+        # self.mh_layer = torch.nn.MultiheadAttention(nhead=nhead)#, batch_first=True)
 
     def forward(self, outputs, cls_idxs=None, **kwargs):
         # outputs dims: [batch, seq_len, embed]
 
         # add dummy 'CLS' token
         cls_idxs = torch.LongTensor(np.zeros((outputs.size(0)))).to(outputs.device) 
-        dummy_cls = self.cls_embed.to(outputs.device)(cls_idxs)
-        # # dummy_cls dims: [batch, embed_size]
+        dummy_cls = self.cls_embed(cls_idxs)
+        # dummy_cls dims: [batch, embed_size]
         dummy_cls = dummy_cls.unsqueeze(1)
         # dummy_cls dims: [batch, 1, embed_size]
         outputs = torch.cat((dummy_cls,outputs), dim=1)
         # outputs dims: [batch, time_steps+1, embed_dim]
-        outputs = self.pos_enc(outputs).transpose(0,1)
-        # outputs dims: [ time_steps+1,batch embed_dim]
-        outputs = self.mh_layer(outputs)[0,:,:]
+        outputs = self.pos_enc(outputs)
+        # outputs dims: [batch, time_steps+1, embed_dim]
+
+        outputs = outputs.transpose(0,1)
+        # outputs dims: [ time_steps+1,batch, embed_dim]
+        outputs, _ = self.mh_layer(outputs, outputs, outputs)
+        # outputs dims: [ time_steps+1,batch, embed_dim]
+
+        outputs = outputs[0,:,:]
+        # outputs = self.bn_final(outputs)
         # outputs dims: [batch, embedding]
         return outputs
 

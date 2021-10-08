@@ -65,11 +65,16 @@ def can_report_mem_usage():
         return False
 
 
-def pbar_update(i, updates_per_epoch, loss_meter, update_every=5, bar_parts=50, aux_losses=None, report_mem_usage=False):
+def pbar_update(i, updates_per_epoch, loss_meter, update_every=1, bar_parts=50, aux_losses=None, report_mem_usage=False, cur_lr=None):
     if  i % update_every  == 0:
+        # This is an ANSI CSI (Control Sequence Introducer) Sequences.
+        # On Unix-like system's \x1b is ESC. "[J" clears from the cursor to the end of the screen
+        print(f"\x1B[J",end="")
         cols = 100
         prefix_str = f"{(i+1):>7}/{updates_per_epoch} "
         stat_lines = [f"{prefix_str}| Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f}"]
+        if cur_lr is not None:
+            stat_lines[0] += f"| {cur_lr}"
         if aux_losses is not None:
             for view_pair_key, loss_dict in aux_losses.items():
                 for loss_type, loss_val in loss_dict.items():
@@ -100,44 +105,36 @@ def pbar_update(i, updates_per_epoch, loss_meter, update_every=5, bar_parts=50, 
             print(stat_line)
         parts_done = int((i+1)/updates_per_epoch*bar_parts)
         parts_togo = int((updates_per_epoch-i-1)/updates_per_epoch*bar_parts)
-        print(" "*len(prefix_str)+"|"+"-"*parts_done+">"+" "*parts_togo+"|", flush=True)
-        tot_lines = len(stat_lines)+2
-        print(f"\x1B[{tot_lines}A")
+        print(" "*len(prefix_str)+"|"+"-"*parts_done+">"+" "*parts_togo+"|")
+
+        # +1 for the status bar.
+        tot_lines = len(stat_lines)+1
+
+        # "[(number)A" moves cursor up (number) spaces.
+        print(f"\x1B[{tot_lines}F",end="", flush=True )
 
 
 def mid_epoch_training_report(epoch, batches_per_epoch, loss_meter,
                               epoch_loss_meter, i, batch_timer,
-                              epoch_time_elapsed, tot_time, 
+                              epoch_time_elapsed, tot_time, cur_lr,
                               args):
 
+    print(f"\x1B[J",end="")
     print('Epoch: [{0}][{1}/{2}]'
-          '  Batch time={bt.val:.1f} ({bt.avg:.1f})'
-          '  Epoch time={et}s'
-          # '  Total time={tt:.1f}'
-          # '  Data load time={dt.val:.3f} ({dt.avg:.3f})'
-          # '  Loss={lt.val:.3f} ({lt.avg:.3f})'
-          # '  Bwd={bwdt.val:.3f} ({bwdt.avg:.3f})'
-          '  Current loss: {loss.val:.3f}'
-          '  Total loss avg: {loss.avg:.3f}'
-          '  Avg. loss for ep.: {epoch_loss.avg:.3f}'
-          # '  QLoss={qloss_str:s}  Perplexity={ppl_str:s}'
-          # '  MultiLing={is_multiling} ({multilangs})'
+          '  Bat time={bt.val:.1f} ({bt.avg:.1f})'
+          '  Ep time={et}s'
+          '  Cur loss: {loss.val:.3f}'
+          '  Tot loss avg: {loss.avg:.3f}'
+          '  Avg loss for ep.: {epoch_loss.avg:.3f}'
+          '  Cur lr: {cur_lr:.8}'
           '  Langs=({langs})'.format(
                        epoch, (i+1), batches_per_epoch,
-                       bt=batch_timer,
-                       et=int(epoch_time_elapsed),
-                       # tt=tot_time,
-                       # dt=data_timer,
-                       # lt=loss_timer,
-                       # bwdt         = bwd_timer,
-                       loss         = loss_meter,
-                       epoch_loss   = epoch_loss_meter,
-                       # ppl_str      = perplexities_str,
-                       # qloss_str    = quant_losses_str,
-                       # is_monoling  = args.monoling is not None,
-                       # is_multiling = args.multiling is not None,
-                       langs     = args.langs
-                       # multilangs   = args.multiling if args.multiling is not None else "N/A"
+                       bt         = batch_timer,
+                       et         = int(epoch_time_elapsed),
+                       loss       = loss_meter,
+                       epoch_loss = epoch_loss_meter,
+                       cur_lr     = cur_lr,
+                       langs      = args.langs
                        ),
            flush = True)
     # recalls = validate(audio_model, image_model, test_loader, args)
@@ -222,7 +219,7 @@ def report_initial_info(batch_size, tot_size, updates_per_epoch, args):
 
 def report_epoch_info(global_step, epoch, cur_lr):
     print("TRAINER: Current #steps=%s, #epochs=%s" % (global_step, epoch))
-    print('TRAINER: Learning rate @ %5d is %f' % (epoch, cur_lr))
+    print('TRAINER: Learning rate @ %d is %.8f' % (epoch, cur_lr))
 
 
 def save_state_and_progress(exp_dir, image_model, audio_models, optimizer, epoch, progress, is_best_acc:bool, args):
@@ -274,16 +271,14 @@ def get_target_multiling_data(full_audio_input, device, args):
 def store_aux_losses(lang_loss=None, pair_aux_losses=None, total_losses=None, lang_ids=None, idxs=None):
     # Create key that will be displayed by pbar
     lang_ids_key = ""
+    if len(idxs) <= 1: # paired with image modality
+        lang_ids_key += "img_"
+    
     for idx in idxs:
         lang_ids_key += lang_ids[idx][:3] +"_"
-    if len(idxs) <= 1: # paired with image modality
-        lang_ids_key += "img"
-    else:
-        lang_ids_key = lang_ids_key[:-1]
-
-    # Don't store if monolingual
-    if len(lang_ids) > 1:
-        total_losses[lang_ids_key] = {"total":lang_loss}
+    
+    lang_ids_key = lang_ids_key[:-1]
+    total_losses[lang_ids_key] = {"total":lang_loss}
 
     # Store additional auxillary losses
     if pair_aux_losses is not None: 
@@ -327,7 +322,7 @@ def multiling_contrastive_computation(image_model, image_input, audio_models:dic
         for i in range(len(lang_ids)):
             for j in range(i+1, len(lang_ids)):
                 pair_loss, pair_al = loss_func(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]])
-                tot_loss = tot_loss + lang_loss
+                tot_loss = tot_loss + pair_loss
 
                 # Save auxillary losses (for diagnostics/debugging)
                 store_aux_losses(lang_loss=pair_loss, pair_aux_losses=pair_al, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i,j])
@@ -431,13 +426,22 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
     epoch += 1
     report_initial_info(batch_size, tot_size, batches_per_epoch, args)
 
-    # Start training
+    
+    # for i in range(args.n_epochs):
+    #     for j in range(batches_per_epoch):
+    cur_lr = adjust_learning_rate(args.lr, args.lr_ramp, args.lr_decay,
+                                  args.lr_decay_multiplier,
+                                  optimizer, global_step+1, batches_per_epoch*args.n_epochs) # +1 to show non-zero lr on first iter
+    #         global_step +=1
+    #         if j % 100 == 0:
+    #
+    #             print(global_step, " lr:", cur_lr)
+    #
+    # sys.exit()
     while epoch <= args.n_epochs:
         epoch_start_time = time.time()
         torch.cuda.empty_cache()
-        cur_lr = adjust_learning_rate(args.lr, args.lr_decay,
-                                      args.lr_decay_multiplier,
-                                      optimizer, epoch)
+
 
         report_epoch_info(global_step, epoch, cur_lr)
 
@@ -450,13 +454,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         image_model.train()
         aux_losses = None
         for i, (image_input, audio_input) in enumerate(train_loader):
-            # if i >= 10:
-            #     break
-            # print(i)
-            # if i <= 279:
-            #     continue
             batch_start_time = time.time()
-            # Display current progress
 
             ### Prepare input
             image_input = image_input.to(device)
@@ -466,12 +464,6 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             loss, aux_losses, model_outputs = multiling_contrastive_computation(
                                                             image_model, image_input, audio_models, target_audio_input,
                                                             loss_func, device, args)
-            if not args.no_pbar:
-                pbar_update( i,
-                             batches_per_epoch,
-                             epoch_loss_meter,
-                             aux_losses=aux_losses,
-                             report_mem_usage=report_mem_usage)
 
             # Update parameters
             optimizer.zero_grad()
@@ -484,14 +476,22 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             epoch_loss_meter.update(loss.item(), image_input.size(0)) #Only for single epoch
             batch_timer.update(time.time() - batch_start_time)
             global_step += 1
+            # Display current progress
+            if not args.no_pbar:
+                pbar_update( i,
+                             batches_per_epoch,
+                             epoch_loss_meter,
+                             aux_losses=aux_losses,
+                             report_mem_usage=report_mem_usage,
+                             cur_lr=cur_lr)
 
             # Optional mid epoch report
-            if (global_step) % args.n_print_steps == 0:
+            if i % args.n_print_steps == 0:
                 epoch_time = time.time()-epoch_start_time
                 tot_time = time.time()-start_time
                 mid_epoch_training_report(epoch, batches_per_epoch, loss_meter,
                                           epoch_loss_meter, i, batch_timer,
-                                          epoch_time, tot_time, 
+                                          epoch_time, tot_time, cur_lr,
                                           args)
 
             # Chech if training went off the rails
@@ -502,10 +502,19 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             # Free up VRAM memory explicitly
             del loss
             if aux_losses is not None:
-                for al in aux_losses:
-                    del al
+                for al in aux_losses.values():
+                    if isinstance(al, dict):
+                        for sub_al in al.values():
+                            del sub_al
+                    else:
+                        del al
             for output in model_outputs.values():
                 del output
+
+            # Increment learning rate. Return value is just for display purposes. Increment happens in function
+            cur_lr = adjust_learning_rate(args.lr, args.lr_ramp, args.lr_decay,
+                                          args.lr_decay_multiplier,
+                                          optimizer, global_step, batches_per_epoch*args.n_epochs)
 
 
         # validate
@@ -563,6 +572,7 @@ def curate_recalls(recalls_record, recalls4display, sim_type):
 
 def report_recalls(recalls, title_str, view1_id, view2_id):
     # Heading
+    print(f"\x1B[J",end="")
     print(f"{title_str+',':<30} view1: {view1_id} view2: {view2_id}")
 
     # Each line of recall scores
@@ -571,7 +581,7 @@ def report_recalls(recalls, title_str, view1_id, view2_id):
         recall_widths = [k[0] for k in recall_widths]
         print(f"{recall_id+':':<20}", end=" ")
         [print(f"| {rec_width}: {recalls[recall_id][rec_width]:6.2%} ", end="") for rec_width in recall_widths]
-        print()
+        print(flush=True)
 
 def curate_and_print_results(view1_output, view2_output, recalls_record, view1_id="", view2_id="", best_r10=0.):
 

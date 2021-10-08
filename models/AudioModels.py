@@ -57,7 +57,7 @@ def make_batch_mask(nframes, max_seq_len, device):
 
 class ResDavenet(nn.Module):
     def __init__(self, feat_dim=40, block=SpeechBasicBlock, layers=[2, 2, 2, 2],
-                 layer_widths=[128, 128, 256, 512, 1024], convsize=9, output_head="avg", device=None):
+                 layer_widths=[128, 128, 256, 512, 1024], convsize=9, output_head="avg", device=None, scale_pe=True):
         assert(len(layers) == 4)
         assert(len(layer_widths) == 5)
         super(ResDavenet, self).__init__()
@@ -88,8 +88,8 @@ class ResDavenet(nn.Module):
         if self.output_head_str == "avg":
             # self.pool_func = nn.AdaptiveAvgPool2d((1, 1))
             self.head_layer = self.avg_output
-        elif self.output_head_str == "transformer":
-            self.head_layer = MyMHAttention(layer_widths[-1], nhead=8, seq_len=500)
+        elif self.output_head_str == "mh_attn":
+            self.head_layer = MyMHAttention(layer_widths[-1], nhead=8, seq_len=500, scale_pe=scale_pe)
 
     def _make_layer(self, block, planes, blocks, width=9, stride=1):
         downsample = None
@@ -151,14 +151,16 @@ class ResDavenet(nn.Module):
         # x dims: [batch, downsampled_time_steps, embed_dim]
         pooling_ratio = round(orig_frames / x.size(-2))
         if nframes is not None:
+            # Behavior of div has changed. Before TF ~1.4 this performed truncated integer division
             curr_nframes:torch.Tensor = torch.div(nframes, pooling_ratio)
-            # Behavior of div has changed
-            # TODO: Check this for newer versions of pytorch
+
+            # Check if float was returned (by newer TF version)
             if curr_nframes.dtype != torch.int64:
                 curr_nframes = torch.trunc(curr_nframes)
-            curr_nframes = curr_nframes.type(torch.float)
-            curr_nframes = torch.where(curr_nframes==0,
-                                       torch.Tensor(1).to(curr_nframes.device).type(curr_nframes.dtype),
+
+            curr_nframes = curr_nframes.type(torch.float) 
+            curr_nframes = torch.where(curr_nframes==0.,
+                                       torch.Tensor([1.]).to(curr_nframes.device).type(curr_nframes.dtype),
                                        curr_nframes) # prevent div by 0
         else:
             curr_nframes = nframes
