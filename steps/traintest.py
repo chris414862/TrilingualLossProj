@@ -74,7 +74,7 @@ def pbar_update(i, updates_per_epoch, loss_meter, update_every=1, bar_parts=50, 
         prefix_str = f"{(i+1):>7}/{updates_per_epoch} "
         stat_lines = [f"{prefix_str}| Ep.Loss avg: {loss_meter.avg:<9.3f} cur: {loss_meter.val:<9.3f}"]
         if cur_lr is not None:
-            stat_lines[0] += f"| {cur_lr}"
+            stat_lines[0] += f"| lr: {cur_lr:<10}"
         if aux_losses is not None:
             for view_pair_key, loss_dict in aux_losses.items():
                 for loss_type, loss_val in loss_dict.items():
