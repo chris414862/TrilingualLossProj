@@ -193,6 +193,8 @@ def get_train_parser(parser=None):
             help='Loss function to use')
     parser.add_argument('--full-graph', action="store_true",
             help='Use every modality pair for contrastive loss (rather than using images as the anchor)')
+    parser.add_argument('--use-custom-hsphere', action="store_true",
+            help='Do not use the multiview coding framework with hyperspheric loss')
     parser.add_argument('--sim-measure', default="dot", choices=['cos', 'dot'],
             help='Similarity measure to use for loss function '+
                  'Options: ["cos", "dot"]. Default: "dot"')
@@ -202,8 +204,10 @@ def get_train_parser(parser=None):
             help='Alpha to use in hyperspheric loss. Default: 2.0')
     parser.add_argument('--hsphere-t', type=float, default=2.0,
             help='t to use in hyperspheric loss. Default: 2.0')
-    parser.add_argument('--hsphere-lam', type=float, default=1.0,
-            help='t to use in hyperspheric loss. Default: 1.0')
+    parser.add_argument('--hsphere-uniform-weight', type=float, default=1.0,
+            help='adjust weighting to use in hyperspheric uniform sub-loss. Default: 1.0')
+    parser.add_argument('--hsphere-align-weight', type=float, default=1.0,
+            help='adjust weighting to use in hyperspheric align sub-loss. Default: 1.0')
 
     return parser
 

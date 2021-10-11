@@ -285,6 +285,56 @@ def store_aux_losses(lang_loss=None, pair_aux_losses=None, total_losses=None, la
         for al_key in pair_aux_losses.keys():
             total_losses[lang_ids_key][al_key] = pair_aux_losses[al_key]
 
+def custom_hsphere_loss_computation(image_model, image_input, audio_models:dict, target_audio_input, loss_func, device, args):
+    model_outputs = dict() # save outputs for explicit deletion later
+    image_output = image_model(image_input)
+    # image dims: [batch, embed_dim]
+    model_outputs['image'] = image_output
+
+    # Get output for each language
+    lang_ids = [k for k in target_audio_input.keys()]
+    for lang_id in lang_ids:
+        audio_input = target_audio_input[lang_id]['lmspecs'], target_audio_input[lang_id]['nframes']
+        audio_output = audio_models[lang_id](*audio_input)
+        # audio dims: [batch, embed_dim]
+        model_outputs[lang_id] = audio_output
+
+    # compute audio-image pairs
+    tot_loss = 0.0
+    tot_aux_losses = OrderedDict() #if len(lang_ids) >= 1 else None
+
+    # get alignment loss
+    for i in range(len(lang_ids)):
+        lang_loss, _ = hsphere_align_loss(model_outputs['image'], model_outputs[lang_ids[i]], args.hsphere_alpha)#, debug=True)
+        lang_loss = args.hsphere_align_weight*lang_loss
+        pair_aux_losses = {"al": lang_loss}
+        tot_loss = tot_loss + lang_loss
+
+        # Save auxillary losses (for diagnostics/debugging)
+        store_aux_losses(lang_loss=lang_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i])
+        for j in range(i+1, len(lang_ids)):
+            pair_loss, _ = hsphere_align_loss(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]], args.hsphere_alpha)
+            pair_loss = args.hsphere_align_weight*pair_loss
+
+            pair_aux_losses = {"al": pair_loss}
+            tot_loss = tot_loss + pair_loss
+
+            # Save auxillary losses (for diagnostics/debugging)
+            store_aux_losses(lang_loss=pair_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i,j])
+
+    # get uniform losses
+    img_loss, _ = hsphere_uniformity_loss(model_outputs['image'], args.hsphere_t)
+    tot_loss = tot_loss + args.hsphere_uniform_weight*img_loss
+    tot_aux_losses["img_u"] = {"total": args.hsphere_uniform_weight*img_loss}
+    for i in range(len(lang_ids)):
+        lang_loss, _ = hsphere_uniformity_loss(model_outputs[lang_ids[i]], args.hsphere_t)#, debug=True)
+        tot_loss = tot_loss + args.hsphere_uniform_weight*lang_loss
+        tot_aux_losses[lang_ids[i]+"_u"] = {"total": args.hsphere_uniform_weight*lang_loss}
+
+    return tot_loss, tot_aux_losses, model_outputs
+
+
+
 def multiling_contrastive_computation(image_model, image_input, audio_models:dict, target_audio_input, loss_func, device, args):
     '''
        Logic for multilingual contrastive loss computation. We assume the image modality is the anchor
@@ -337,12 +387,22 @@ def get_loss_function(args):
         return TripletLoss(margin=args.margin) 
     elif args.loss == 'triplet_w_hardneg':
         return TripletLoss(margin=args.margin, use_hard_neg=True)
-    elif args.loss == "hyperspheric":
-        return HypersphericLoss(alpha=args.hsphere_alpha, t=args.hsphere_t, lam=args.hsphere_lam)
+    elif args.loss == "hyperspheric" and not args.use_custom_hsphere:
+        return HypersphericLoss(alpha=args.hsphere_alpha, t=args.hsphere_t, align_weight=args.hsphere_align_weight, 
+                uniform_weight=args.hsphere_uniform_weight)
+    elif args.loss == "hyperspheric" and args.use_custom_hsphere:
+        return None
     elif args.loss == "masked_margin_sm":
         raise NotImplementedError()
     else:
         raise ValueError(f"Could not recognize loss function {args.loss}")
+
+
+def get_loss_function_wrapper(args):
+    if args.loss == "hyperspheric" and args.use_custom_hsphere:
+        return custom_hsphere_loss_computation
+    else:
+        return multiling_contrastive_computation
 
 def init_progress(progress:dict):
     progress.update({
@@ -415,6 +475,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
 
     # Get loss function
     loss_func = get_loss_function(args)
+    loss_func_wrapper = get_loss_function_wrapper(args)
 
     # Alias convenient variables
     batch_size = train_loader.batch_size
@@ -461,7 +522,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             target_audio_input = get_target_multiling_data(audio_input, device, args)
 
             # Compute loss
-            loss, aux_losses, model_outputs = multiling_contrastive_computation(
+            loss, aux_losses, model_outputs = loss_func_wrapper(
                                                             image_model, image_input, audio_models, target_audio_input,
                                                             loss_func, device, args)
 

@@ -73,10 +73,11 @@ def calc_recalls(S, view1="", view2=""):
 
 
 class HypersphericLoss():
-    def __init__(self, alpha=2, t=2, lam=1.):
+    def __init__(self, alpha=2, t=2, align_weight=1., uniform_weight=1.):
         self.alpha=alpha
         self.t=t
-        self.lam=lam
+        self.align_weight=align_weight
+        self.uniform_weight=uniform_weight
 
     def align_loss(self, view1, view2):
         return (view1 - view2).norm(p=2, dim=1).pow(self.alpha).mean()
@@ -90,9 +91,21 @@ class HypersphericLoss():
 
     def __call__(self, view1, view2, **kwargs):
         al =self.align_loss(view1, view2) 
+        al = self.align_weight*al
         ul = self.uniformity_loss(view1, view2)
+        ul = self.uniform_weight*ul
 
-        return al + self.lam*ul, {"al":al, "ul":ul}
+        return al + ul, {"al":al, "ul":ul}
+
+
+
+
+def hsphere_uniformity_loss(view:torch.Tensor, t):
+    sq_distances = torch.pdist(view, p=2).pow(2)
+    return sq_distances.mul(-t).exp().mean().log(), None
+
+def hsphere_align_loss(view1, view2, alpha):
+    return (view1 - view2).norm(p=2, dim=1).pow(alpha).mean(), None
 
 
 class TripletLoss(nn.Module):
