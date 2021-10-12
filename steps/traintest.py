@@ -307,17 +307,16 @@ def custom_hsphere_loss_computation(image_model, image_input, audio_models:dict,
     for i in range(len(lang_ids)):
         lang_loss, _ = hsphere_align_loss(model_outputs['image'], model_outputs[lang_ids[i]], args.hsphere_alpha)#, debug=True)
         lang_loss = args.hsphere_align_weight*lang_loss
-        pair_aux_losses = {"al": lang_loss}
         tot_loss = tot_loss + lang_loss
+        pair_aux_losses = {"al": lang_loss}
 
         # Save auxillary losses (for diagnostics/debugging)
         store_aux_losses(lang_loss=lang_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i])
         for j in range(i+1, len(lang_ids)):
             pair_loss, _ = hsphere_align_loss(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]], args.hsphere_alpha)
             pair_loss = args.hsphere_align_weight*pair_loss
-
-            pair_aux_losses = {"al": pair_loss}
             tot_loss = tot_loss + pair_loss
+            pair_aux_losses = {"al": pair_loss}
 
             # Save auxillary losses (for diagnostics/debugging)
             store_aux_losses(lang_loss=pair_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i,j])
@@ -328,8 +327,9 @@ def custom_hsphere_loss_computation(image_model, image_input, audio_models:dict,
     tot_aux_losses["img_u"] = {"total": args.hsphere_uniform_weight*img_loss}
     for i in range(len(lang_ids)):
         lang_loss, _ = hsphere_uniformity_loss(model_outputs[lang_ids[i]], args.hsphere_t)#, debug=True)
-        tot_loss = tot_loss + args.hsphere_uniform_weight*lang_loss
-        tot_aux_losses[lang_ids[i]+"_u"] = {"total": args.hsphere_uniform_weight*lang_loss}
+        lang_loss = args.hsphere_uniform_weight*lang_loss
+        tot_loss = tot_loss + lang_loss
+        tot_aux_losses[lang_ids[i]+"_u"] = {"total": lang_loss}
 
     return tot_loss, tot_aux_losses, model_outputs
 

@@ -6,6 +6,7 @@ import pickle
 import random
 import torch
 import torch.nn as nn
+import sys
 from collections import defaultdict
 
 
@@ -84,7 +85,9 @@ class HypersphericLoss():
 
     def u_single_view(self, view:torch.Tensor):
         sq_distances = torch.pdist(view, p=2).pow(2)
-        return sq_distances.mul(-self.t).exp().mean().log()
+        ret =  sq_distances.mul(-self.t).exp().mean()
+        ret = ret + 1e-10
+        return ret.log()
 
     def uniformity_loss(self, view1, view2):
         return (self.u_single_view(view1) + self.u_single_view(view2))/2
@@ -101,11 +104,18 @@ class HypersphericLoss():
 
 
 def hsphere_uniformity_loss(view:torch.Tensor, t):
+    # view dims: [batch, feat_dims]
     sq_distances = torch.pdist(view, p=2).pow(2)
-    return sq_distances.mul(-t).exp().mean().log(), None
+    # sq_distances dims: [batch*(batch-1)/2]
+    avg = sq_distances.mul(-t).exp().mean()
+    avg = avg + 1e-10
+    ret = avg.log()
+
+    return ret, None
 
 def hsphere_align_loss(view1, view2, alpha):
-    return (view1 - view2).norm(p=2, dim=1).pow(alpha).mean(), None
+    ret = (view1 - view2).norm(p=2, dim=1).pow(alpha).mean()
+    return ret, None
 
 
 class TripletLoss(nn.Module):
