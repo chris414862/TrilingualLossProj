@@ -140,7 +140,11 @@ def get_default_parser(parser=None):
             help='Head layer to use to get single vector representation of the audio model. '+
                  'Options: ["avg", "mh_attn", "custom_self_attn"]. '+
                  'Default: "avg"')
-    parser.add_argument('--no-scale-pe', action="store_true")
+    parser.add_argument('--no-scale-pe', action="store_true",
+            help="Don't scale (by sqrt(d_model))in the positional embeddings layer")
+    parser.add_argument('--norm-outputs-in-loss', action="store_true",
+            help="Normalize all model outputs before loss computation. Places all ouputs on the 'hypersphere'. "+
+                 "If --loss=hypersheric is set, this will automatically be set to true.")
 
 
 
@@ -193,6 +197,8 @@ def get_train_parser(parser=None):
             help='Loss function to use')
     parser.add_argument('--full-graph', action="store_true",
             help='Use every modality pair for contrastive loss (rather than using images as the anchor)')
+    parser.add_argument('--validate-full-graph', action="store_true",
+            help='Use every modality pair in the validation output')
     parser.add_argument('--use-custom-hsphere', action="store_true",
             help='Do not use the multiview coding framework with hyperspheric loss')
     parser.add_argument('--sim-measure', default="dot", choices=['cos', 'dot'],
@@ -254,6 +260,9 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     set_seeds(args.seed)
+    if args.loss == "hyperspheric":
+        print("RUNSCRIPT: Hyperspheric loss detected. Setting '--norm_ouputs_in_loss' flag to True.", )
+        args.norm_outputs_in_loss = True
 
     def get_and_del_attr(name):
         val = getattr(args, name)

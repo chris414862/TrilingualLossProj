@@ -7,8 +7,9 @@ import random
 import torch
 import torch.nn as nn
 import sys
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
+EPSILON=1e-15
 
 
 def calc_recalls(S, view1="", view2=""):
@@ -81,12 +82,15 @@ class HypersphericLoss():
         self.uniform_weight=uniform_weight
 
     def align_loss(self, view1, view2):
+        # view dims: [batch, feat_dims]
         return (view1 - view2).norm(p=2, dim=1).pow(self.alpha).mean()
 
     def u_single_view(self, view:torch.Tensor):
+        # view dims: [batch, feat_dims]
         sq_distances = torch.pdist(view, p=2).pow(2)
+        # sq_distances dims: [batch*(batch-1)/2]
         ret =  sq_distances.mul(-self.t).exp().mean()
-        ret = ret + 1e-10
+        ret = ret + EPSILON
         return ret.log()
 
     def uniformity_loss(self, view1, view2):
@@ -103,17 +107,18 @@ class HypersphericLoss():
 
 
 
-def hsphere_uniformity_loss(view:torch.Tensor, t):
+def hsphere_uniformity_loss(view:torch.Tensor, t=2.0):
     # view dims: [batch, feat_dims]
     sq_distances = torch.pdist(view, p=2).pow(2)
     # sq_distances dims: [batch*(batch-1)/2]
     avg = sq_distances.mul(-t).exp().mean()
-    avg = avg + 1e-10
+    avg = avg + EPSILON
     ret = avg.log()
 
     return ret, None
 
-def hsphere_align_loss(view1, view2, alpha):
+def hsphere_align_loss(view1, view2, alpha=2.0):
+    # view dims: [batch, feat_dims]
     ret = (view1 - view2).norm(p=2, dim=1).pow(alpha).mean()
     return ret, None
 
@@ -224,7 +229,7 @@ class MultiViewCodingLoss(nn.Module):
             mask: ( torch.Tensor ) 
                 Shape=[batch,embed_size]
         """
-        aux_losses = dict()
+        aux_losses = OrderedDict()
         density_ratios = self.den_ratio_func(view1, view2)#, debug=kwargs['debug'])
         density_ratios = density_ratios/self.tao
         # print("density_ratios", density_ratios, density_ratios.shape) if kwargs['debug'] else ""

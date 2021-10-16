@@ -80,11 +80,11 @@ def pbar_update(i, updates_per_epoch, loss_meter, update_every=1, bar_parts=50, 
                 for loss_type, loss_val in loss_dict.items():
                     curr_stat_line = stat_lines.pop(-1)
                     if loss_type.strip() == "total": # New view pair always gets a new line
-                        new_str = f"| {view_pair_key}: {loss_val.item():8.3f} "
+                        new_str = f"| {view_pair_key+':':<12} {loss_val.item():8.3f} "
                         stat_lines.append(curr_stat_line)
                         stat_lines.append(" "*len(prefix_str)+new_str)
                     else:
-                        new_str = f"| {view_pair_key+'_'+loss_type}: {loss_val.item():8.3f} "
+                        new_str = f"| {view_pair_key+'_'+loss_type:<12}: {loss_val.item():8.3f} "
                         if len(curr_stat_line + new_str) > cols:
                             stat_lines.append(curr_stat_line)
                             stat_lines.append(" "*len(prefix_str)+new_str)
@@ -268,27 +268,13 @@ def get_target_multiling_data(full_audio_input, device, args):
 
     return target_audio_input
 
-def store_aux_losses(lang_loss=None, pair_aux_losses=None, total_losses=None, lang_ids=None, idxs=None):
-    # Create key that will be displayed by pbar
-    lang_ids_key = ""
-    if len(idxs) <= 1: # paired with image modality
-        lang_ids_key += "img_"
-    
-    for idx in idxs:
-        lang_ids_key += lang_ids[idx][:3] +"_"
-    
-    lang_ids_key = lang_ids_key[:-1]
-    total_losses[lang_ids_key] = {"total":lang_loss}
 
-    # Store additional auxillary losses
-    if pair_aux_losses is not None: 
-        for al_key in pair_aux_losses.keys():
-            total_losses[lang_ids_key][al_key] = pair_aux_losses[al_key]
 
-def custom_hsphere_loss_computation(image_model, image_input, audio_models:dict, target_audio_input, loss_func, device, args):
+def get_model_outputs(image_model, image_input, audio_models:dict, target_audio_input:dict, args):
     model_outputs = dict() # save outputs for explicit deletion later
     image_output = image_model(image_input)
-    # image dims: [batch, embed_dim]
+    # image_output dims: [batch, embed_dim]
+    
     model_outputs['image'] = image_output
 
     # Get output for each language
@@ -299,43 +285,57 @@ def custom_hsphere_loss_computation(image_model, image_input, audio_models:dict,
         # audio dims: [batch, embed_dim]
         model_outputs[lang_id] = audio_output
 
+    if args.norm_outputs_in_loss:
+        for output in model_outputs.values():
+            output = output /output.norm(p=2, dim=-1, keepdim=True)
+
+    return model_outputs, lang_ids
+
+
+def compute_view_pair_loss(model_output1, model_output2, loss_func,  loss_record, view_pair_id, loss_weight=1.0, **extra_loss_kwargs):
+    loss, aux_losses = loss_func(model_output1, model_output2, **extra_loss_kwargs)#, debug=True)
+    loss = loss * loss_weight
+    loss_record[view_pair_id] = OrderedDict()
+    loss_record[view_pair_id]["total"] = loss
+    if aux_losses is not None:
+        assert isinstance(aux_losses, dict)
+        loss_record[view_pair_id].update(aux_losses)
+    return loss
+
+
+def custom_hsphere_loss_computation(image_model, image_input, audio_models:dict, target_audio_input,  device, args, **kwargs):
+    
+    model_outputs, lang_ids = get_model_outputs(image_model, image_input, audio_models, target_audio_input, args)
+
     # compute audio-image pairs
     tot_loss = 0.0
-    tot_aux_losses = OrderedDict() #if len(lang_ids) >= 1 else None
+
+    # record loss for display purposes
+    loss_record = OrderedDict() #if len(lang_ids) >= 1 else None
 
     # get alignment loss
-    for i in range(len(lang_ids)):
-        lang_loss, _ = hsphere_align_loss(model_outputs['image'], model_outputs[lang_ids[i]], args.hsphere_alpha)#, debug=True)
-        lang_loss = args.hsphere_align_weight*lang_loss
-        tot_loss = tot_loss + lang_loss
-        pair_aux_losses = {"al": lang_loss}
-
-        # Save auxillary losses (for diagnostics/debugging)
-        store_aux_losses(lang_loss=lang_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i])
-        for j in range(i+1, len(lang_ids)):
-            pair_loss, _ = hsphere_align_loss(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]], args.hsphere_alpha)
-            pair_loss = args.hsphere_align_weight*pair_loss
-            tot_loss = tot_loss + pair_loss
-            pair_aux_losses = {"al": pair_loss}
-
-            # Save auxillary losses (for diagnostics/debugging)
-            store_aux_losses(lang_loss=pair_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i,j])
+    loss, loss_record, _ = multiling_contrastive_computation(image_model, image_input, audio_models, target_audio_input,  device, args, 
+                                      loss_func=hsphere_align_loss, loss_weight=args.hsphere_align_weight, model_outputs=model_outputs,
+                                      lang_ids=lang_ids, view_pair_suffix="_al")
+    # aligin weight applied above
+    tot_loss = tot_loss + loss
 
     # get uniform losses
-    img_loss, _ = hsphere_uniformity_loss(model_outputs['image'], args.hsphere_t)
+    img_loss, _ = hsphere_uniformity_loss(model_outputs['image'], t=args.hsphere_t)
     tot_loss = tot_loss + args.hsphere_uniform_weight*img_loss
-    tot_aux_losses["img_u"] = {"total": args.hsphere_uniform_weight*img_loss}
+    loss_record["img_u"] = {"total": args.hsphere_uniform_weight*img_loss}
     for i in range(len(lang_ids)):
-        lang_loss, _ = hsphere_uniformity_loss(model_outputs[lang_ids[i]], args.hsphere_t)#, debug=True)
+        lang_loss, _ = hsphere_uniformity_loss(model_outputs[lang_ids[i]], t=args.hsphere_t)#, debug=True)
         lang_loss = args.hsphere_uniform_weight*lang_loss
         tot_loss = tot_loss + lang_loss
-        tot_aux_losses[lang_ids[i]+"_u"] = {"total": lang_loss}
+        loss_record[lang_ids[i][:3]+"_u"] = {"total": lang_loss}
 
-    return tot_loss, tot_aux_losses, model_outputs
+    return tot_loss, loss_record, model_outputs
 
 
 
-def multiling_contrastive_computation(image_model, image_input, audio_models:dict, target_audio_input, loss_func, device, args):
+def multiling_contrastive_computation(image_model, image_input, audio_models:dict, target_audio_input:dict, device, args,
+                                      loss_weight=1.0, loss_func=None, model_outputs=None, lang_ids=None, view_pair_suffix="", **extra_loss_kwargs):
     '''
        Logic for multilingual contrastive loss computation. We assume the image modality is the anchor
        unless the '--full-graph' argument is set
@@ -344,40 +344,28 @@ def multiling_contrastive_computation(image_model, image_input, audio_models:dic
             batch_loss: torch.Tenser - loss for the batch. Size is []. I.e the loss is a scalar
     '''
 
-    model_outputs = dict() # save outputs for explicit deletion later
-    image_output = image_model(image_input)
-    # image dims: [batch, embed_dim]
-    model_outputs['image'] = image_output
-
-    # Get output for each language
-    lang_ids = [k for k in target_audio_input.keys()]
-    for lang_id in lang_ids:
-        audio_input = target_audio_input[lang_id]['lmspecs'], target_audio_input[lang_id]['nframes']
-        audio_output = audio_models[lang_id](*audio_input)
-        # audio dims: [batch, embed_dim]
-        model_outputs[lang_id] = audio_output
+    if model_outputs is None: 
+        model_outputs, lang_ids = get_model_outputs(image_model, image_input, audio_models, target_audio_input, args)
 
     # compute audio-image pairs
     tot_loss = 0.0
-    tot_aux_losses = OrderedDict() #if len(lang_ids) >= 1 else None
+    loss_record = OrderedDict() #if len(lang_ids) >= 1 else None
     for i in range(len(lang_ids)):
-        lang_loss, pair_aux_losses = loss_func(model_outputs['image'], model_outputs[lang_ids[i]])#, debug=True)
-        tot_loss = tot_loss + lang_loss
-
-        # Save auxillary losses (for diagnostics/debugging)
-        store_aux_losses(lang_loss=lang_loss, pair_aux_losses=pair_aux_losses, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i])
+        view_pair_id = "img_"+lang_ids[i][:3]+view_pair_suffix
+        loss = compute_view_pair_loss(model_outputs['image'], model_outputs[lang_ids[i]], loss_func, loss_record, view_pair_id,
+                                      loss_weight=loss_weight, **extra_loss_kwargs)
+        tot_loss = tot_loss + loss
 
     # Get language to language contrastive losses
     if args.full_graph:
         for i in range(len(lang_ids)):
             for j in range(i+1, len(lang_ids)):
-                pair_loss, pair_al = loss_func(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]])
-                tot_loss = tot_loss + pair_loss
+                view_pair_id = lang_ids[i][:3]+"_"+lang_ids[j][:3]+view_pair_suffix
+                loss = compute_view_pair_loss(model_outputs[lang_ids[i]], model_outputs[lang_ids[j]], loss_func, loss_record, view_pair_id,
+                                              loss_weight=loss_weight, **extra_loss_kwargs)
+                tot_loss = tot_loss + loss
 
-                # Save auxillary losses (for diagnostics/debugging)
-                store_aux_losses(lang_loss=pair_loss, pair_aux_losses=pair_al, total_losses=tot_aux_losses, lang_ids=lang_ids, idxs=[i,j])
-
-    return tot_loss, tot_aux_losses, model_outputs
+    return tot_loss, loss_record, model_outputs
 
 
 def get_loss_function(args):
@@ -488,17 +476,9 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
     report_initial_info(batch_size, tot_size, batches_per_epoch, args)
 
     
-    # for i in range(args.n_epochs):
-    #     for j in range(batches_per_epoch):
     cur_lr = adjust_learning_rate(args.lr, args.lr_ramp, args.lr_decay,
                                   args.lr_decay_multiplier,
                                   optimizer, global_step+1, batches_per_epoch*args.n_epochs) # +1 to show non-zero lr on first iter
-    #         global_step +=1
-    #         if j % 100 == 0:
-    #
-    #             print(global_step, " lr:", cur_lr)
-    #
-    # sys.exit()
     while epoch <= args.n_epochs:
         epoch_start_time = time.time()
         torch.cuda.empty_cache()
@@ -524,7 +504,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             # Compute loss
             loss, aux_losses, model_outputs = loss_func_wrapper(
                                                             image_model, image_input, audio_models, target_audio_input,
-                                                            loss_func, device, args)
+                                                             device, args, loss_func=loss_func)
 
             # Update parameters
             optimizer.zero_grad()
@@ -631,7 +611,8 @@ def curate_recalls(recalls_record, recalls4display, sim_type):
         recalls_record[avg_id+'_'+sim_type+"_avg_"+recall_width] = avg_recalls[recall_width]
         recalls4display["avg"][recall_width] = avg_recalls[recall_width]
 
-def report_recalls(recalls, title_str, view1_id, view2_id):
+
+def print_recalls(recalls, title_str, view1_id, view2_id):
     # Heading
     print(f"\x1B[J",end="")
     print(f"{title_str+',':<30} view1: {view1_id} view2: {view2_id}")
@@ -643,6 +624,7 @@ def report_recalls(recalls, title_str, view1_id, view2_id):
         print(f"{recall_id+':':<20}", end=" ")
         [print(f"| {rec_width}: {recalls[recall_id][rec_width]:6.2%} ", end="") for rec_width in recall_widths]
         print(flush=True)
+
 
 def curate_and_print_results(view1_output, view2_output, recalls_record, view1_id="", view2_id="", best_r10=0.):
 
@@ -660,8 +642,8 @@ def curate_and_print_results(view1_output, view2_output, recalls_record, view1_i
 
     # Display results
     print()
-    report_recalls(dot_recalls, "Dot Product Retrieval", view1_id, view2_id)
-    report_recalls(cos_recalls, "Cosine Retrieval", view1_id, view2_id)
+    print_recalls(dot_recalls, "Dot Product Retrieval", view1_id, view2_id)
+    print_recalls(cos_recalls, "Cosine Retrieval", view1_id, view2_id)
 
     # Record the best seen r10 score. Easier to do here with structure of display dict (which is discarded)
     if dot_recalls['avg']['r10'] > best_r10:
@@ -698,7 +680,6 @@ def validate(image_model,audio_models, val_loader, device, args):
             target_audio_input  = get_target_multiling_data(audio_input, device, args)
             image_input = image_input.to(device)
 
-
             # compute output
             image_output = image_model(image_input)
             image_output = image_output.to('cpu').detach()
@@ -716,7 +697,7 @@ def validate(image_model,audio_models, val_loader, device, args):
         for i in range(len(lang_ids)):
             audio_output = torch.cat(A_embeddings[lang_ids[i]])
             best_r10 = curate_and_print_results(image_output, audio_output, all_recalls, view1_id="image", view2_id=lang_ids[i], best_r10=best_r10)
-            if args.full_graph: # Compute all pairs
+            if args.validate_full_graph: # Compute all pairs
                 for j in range(i+1, len(lang_ids)):
                     audio_output2 = torch.cat(A_embeddings[lang_ids[j]])
                     best_r10 = curate_and_print_results(image_output, audio_output2, all_recalls, view1_id=lang_ids[i], view2_id=lang_ids[j], best_r10=best_r10)
