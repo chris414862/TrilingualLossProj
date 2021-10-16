@@ -8,20 +8,20 @@
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="$SCRATCH/debug_exps/test"
+EXPDIR="$SCRATCH/exps/HYPERSHPERIC_AVG_HEAD_ORIG"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="0,5"
+devs_to_use=""
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
-extra_args=( "--batch-size=128"  "--mode=train" "--langs=english,hindi,japanese" "--lr=.001")
+extra_args=( "--batch-size=128" "--n-epochs=75"  "--mode=train" "--langs=english,hindi,japanese" "--lr=.001")
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg" "--full-graph" "--validate-full-graph") 
-extra_args+=("--n-epochs=75" "--loss=hyperspheric" "--hsphere-alpha=2.0" "--hsphere-t=2.0" "--n-print-steps=100")
-extra_args+=("--hsphere-align-weight=1.0" "--hsphere-uniform-weight=1.0" "--lr-ramp=0.001" "--use-custom-hsphere")
-#"--weight-decay=0.0")
+extra_args+=("--loss=hyperspheric" "--hsphere-alpha=2.0" "--hsphere-t=2.0" "--n-print-steps=100")
+extra_args+=("--hsphere-align-weight=1.0" "--hsphere-uniform-weight=1.0" "--lr-ramp=.1")
+#"--use-custom-hsphere")
 #"--no-pbar") 
 
 #### Set script constants

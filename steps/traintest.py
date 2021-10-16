@@ -495,6 +495,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         image_model.train()
         aux_losses = None
         for i, (image_input, audio_input) in enumerate(train_loader):
+            break
             batch_start_time = time.time()
 
             ### Prepare input
@@ -631,25 +632,31 @@ def curate_and_print_results(view1_output, view2_output, recalls_record, view1_i
     # Get similarity measures
     dot_S = dot_sim_matrix(view1_output, view2_output)
     cos_S = cosine_sim_matrix(view1_output, view2_output)
+    norm_dot_S =dot_sim_matrix(view1_output/view1_output.norm(p=2, dim=-1, keepdim=True), view2_output/view1_output.norm(p=2, dim=-1, keepdim=True)) 
 
     # Calculate recall scores
     dot_recalls = calc_recalls(dot_S, view1=view1_id, view2=view2_id)
     cos_recalls = calc_recalls(cos_S, view1=view1_id, view2=view2_id)
+    norm_dot_recalls = calc_recalls(norm_dot_S, view1=view1_id, view2=view2_id)
 
     # Organize the keys and structure of the record and display dicts
     curate_recalls(recalls_record, dot_recalls, sim_type="dot")
     curate_recalls(recalls_record, cos_recalls, sim_type="cos")
+    curate_recalls(recalls_record, norm_dot_recalls, sim_type="norm_dot")
 
     # Display results
     print()
     print_recalls(dot_recalls, "Dot Product Retrieval", view1_id, view2_id)
     print_recalls(cos_recalls, "Cosine Retrieval", view1_id, view2_id)
+    print_recalls(norm_dot_recalls, "Normalized Dot Product Retrieval", view1_id, view2_id)
 
     # Record the best seen r10 score. Easier to do here with structure of display dict (which is discarded)
     if dot_recalls['avg']['r10'] > best_r10:
         best_r10 = dot_recalls['avg']['r10']
     if cos_recalls['avg']['r10'] > best_r10:
         best_r10 = cos_recalls['avg']['r10']
+    if norm_dot_recalls['avg']['r10'] > best_r10:
+        best_r10 = norm_dot_recalls['avg']['r10']
 
     return best_r10
 
