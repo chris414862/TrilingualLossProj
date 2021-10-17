@@ -56,7 +56,7 @@ class MyMHAttention(nn.Module):
 
         # self.mh_layer = torch.nn.MultiheadAttention(nhead=nhead)#, batch_first=True)
 
-    def forward(self, outputs, cls_idxs=None, **kwargs):
+    def forward(self, outputs, **kwargs):
         # outputs dims: [batch, seq_len, embed]
 
         # add dummy 'CLS' token

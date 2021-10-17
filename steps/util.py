@@ -74,6 +74,13 @@ def calc_recalls(S, view1="", view2=""):
     return recalls
 
 
+def check_tensor(tens, ident, label): 
+    if torch.isnan(tens).sum() > 0 or torch.isinf(tens).sum() > 0:
+        print(f"LOSS FUNC: id: {ident} label: {label} nans: {torch.isnan(tens).sum()}, infs: {torch.isinf(tens).sum()}")
+        return True
+    else:
+        return False
+
 class HypersphericLoss():
     def __init__(self, alpha=2, t=2, align_weight=1., uniform_weight=1.):
         self.alpha=alpha
@@ -93,33 +100,47 @@ class HypersphericLoss():
         ret = ret + EPSILON
         return ret.log()
 
-    def uniformity_loss(self, view1, view2):
-        return (self.u_single_view(view1) + self.u_single_view(view2))/2
+    def uniformity_loss(self, view1, view2, view_pair_id="", **kwargs):
+        u1 =  self.u_single_view(view1) 
+        u2 =  self.u_single_view(view2)/2
 
-    def __call__(self, view1, view2, **kwargs):
+        return u1 + u2, ul1, ul2
+
+
+    def __call__(self, view1, view2, view_pair_id="",  **kwargs):
         al =self.align_loss(view1, view2) 
         al = self.align_weight*al
-        ul = self.uniformity_loss(view1, view2)
+        ul, ul1, ul2 = self.uniformity_loss(view1, view2, view_pair_id=view_pair_id)
         ul = self.uniform_weight*ul
+        if check_tensor(ul, view_pair_id, "ul") or check_tensor(al, view_pair_id, "al"):
+            check_tensor(view1, view_pair_id, "input from first in pair")
+            check_tensor(view2, view_pair_id, "input from second in pair")
+            check_tensor(ul2, view_pair_id, "ul from first")
+            check_tensor(ul2, view_pair_id, "ul from second")
 
         return al + ul, {"al":al, "ul":ul}
 
 
 
 
-def hsphere_uniformity_loss(view:torch.Tensor, t=2.0):
+def hsphere_uniformity_loss(view:torch.Tensor, t=2.0, view_id=""):
     # view dims: [batch, feat_dims]
     sq_distances = torch.pdist(view, p=2).pow(2)
     # sq_distances dims: [batch*(batch-1)/2]
     avg = sq_distances.mul(-t).exp().mean()
     avg = avg + EPSILON
     ret = avg.log()
-
+    if check_tensor(ret, view_id, "ul"):
+        check_tensor(view, view_id, "ul input")
+        check_tensor(avg, view_id, "ul after avg")
     return ret, None
 
-def hsphere_align_loss(view1, view2, alpha=2.0):
+def hsphere_align_loss(view1, view2, alpha=2.0, view_pair_id=""):
     # view dims: [batch, feat_dims]
     ret = (view1 - view2).norm(p=2, dim=1).pow(alpha).mean()
+    if check_tensor(ret, view_pair_id, "al"):
+        check_tensor(view1, view_pair_id, "al input 1")
+        check_tensor(view2, view_pair_id, "al input 2")
     return ret, None
 
 

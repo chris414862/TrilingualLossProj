@@ -132,14 +132,22 @@ class ResDavenet(nn.Module):
         audio_outputs = audio_outputs.sum(dim=1)/divisor
         return audio_outputs
 
-    def forward(self, x, nframes=None, cls_idxs=None):
+    def forward(self, x, nframes=None, view_id=""):
+        def check_tensor(tens, ident, label): 
+            if torch.isnan(tens).sum() > 0 or torch.isinf(tens).sum() > 0:
+                print(f"AUDIO MODEL: id: {ident} label: {label} nans: {torch.isnan(tens).sum()}, infs: {torch.isinf(tens).sum()}")
+                return True
+            else:
+                return False
+
         # x dims: [batch, audio_feat_dim, max_time_steps]
         orig_frames = x.size(-1)
         # print("orig x:", x.shape)
-    
+        orig_x = x 
         if x.dim() == 3:
             x = x.unsqueeze(1)
         x = self.conv1(x)
+        after_first_conv =x
         x = self.bn1(x)
         x = self.relu(x)
         x = self.layer1(x)
@@ -148,6 +156,7 @@ class ResDavenet(nn.Module):
         x = self.layer4(x)
         # x dims: [batch, embed_dim, 1, downsampled_time_steps]
         x = x.squeeze(2).transpose(1,2)
+        pre_head_x = x
         # x dims: [batch, downsampled_time_steps, embed_dim]
         pooling_ratio = round(orig_frames / x.size(-2))
         if nframes is not None:
@@ -159,12 +168,17 @@ class ResDavenet(nn.Module):
                 curr_nframes = torch.trunc(curr_nframes)
 
             curr_nframes = curr_nframes.type(torch.float) 
-            curr_nframes = torch.where(curr_nframes==0.,
+            curr_nframes = torch.where(curr_nframes<=0.,
                                        torch.Tensor([1.]).to(curr_nframes.device).type(curr_nframes.dtype),
                                        curr_nframes) # prevent div by 0
         else:
             curr_nframes = nframes
-        x = self.head_layer(x, nframes=curr_nframes, cls_idxs=cls_idxs)
+        x = self.head_layer(x, nframes=curr_nframes)
+        
+        if check_tensor(x, view_id, "output CHECK"):
+            check_tensor(orig_x, view_id, "input")
+            check_tensor(after_first_conv, view_id, "output")
+            check_tensor(pre_head_x, view_id, "pre-head")
         # x dims: [batch, embed_dim]
         return x
 

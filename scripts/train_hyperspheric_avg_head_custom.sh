@@ -4,6 +4,8 @@
 # Augmented by: Chris Crabtree
 
 
+# This moves the cursor down 20 rows after the shell exits or error occurs. Helps to save progress display info on ctrl-c
+trap 'printf "\x1b[20E"' err exit
 
 
 #### Set script defualt arguments

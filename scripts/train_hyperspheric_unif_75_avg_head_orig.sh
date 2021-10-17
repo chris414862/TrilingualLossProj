@@ -17,7 +17,7 @@ devs_to_use=""
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
-extra_args=( "--batch-size=128" "--n-epochs=75"  "--mode=train" "--langs=english,hindi,japanese" "--lr=.001")
+extra_args=( "--batch-size=128" "--n-epochs=75"  "--mode=train" "--langs=english,hindi,japanese" "--lr=.0001")
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg" "--full-graph" "--validate-full-graph") 
 extra_args+=("--loss=hyperspheric" "--hsphere-alpha=2.0" "--hsphere-t=2.0" "--n-print-steps=100")
 extra_args+=("--hsphere-align-weight=1.0" "--hsphere-uniform-weight=.75" "--lr-ramp=.1")

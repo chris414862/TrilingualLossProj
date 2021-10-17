@@ -195,6 +195,8 @@ def get_train_parser(parser=None):
     parser.add_argument('--loss', type=str, default='multiview_coding',
             choices=['triplet', 'triplet_w_hardneg','multiview_coding','hyperspheric', 'masked_margin_sm'],
             help='Loss function to use')
+    parser.add_argument('--clip-grad', type=float, default=1e100,
+            help='Cap gradient at specified level. Default is extremely high (1e100).')
     parser.add_argument('--full-graph', action="store_true",
             help='Use every modality pair for contrastive loss (rather than using images as the anchor)')
     parser.add_argument('--validate-full-graph', action="store_true",
