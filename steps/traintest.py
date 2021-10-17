@@ -112,13 +112,15 @@ def pbar_update(i, updates_per_epoch, loss_meter, update_every=1, bar_parts=50, 
 
         # "[(number)A" moves cursor up (number) spaces.
         print(f"\x1B[{tot_lines}F",end="", flush=True )
+        return tot_lines
 
 
 def mid_epoch_training_report(epoch, batches_per_epoch, loss_meter,
                               epoch_loss_meter, i, batch_timer,
-                              epoch_time_elapsed, tot_time, cur_lr,
+                              epoch_time_elapsed, tot_time, cur_lr, num_stat_lines,
                               args):
 
+    print(f"\x1B[{num_stat_lines}E", end="")
     print(f"\x1B[J",end="")
     print('Epoch: [{0}][{1}/{2}]'
           '  Bat time={bt.val:.1f} ({bt.avg:.1f})'
@@ -286,8 +288,8 @@ def get_model_outputs(image_model, image_input, audio_models:dict, target_audio_
         model_outputs[lang_id] = audio_output
 
     if args.norm_outputs_in_loss:
-        for output in model_outputs.values():
-            output = output /output.norm(p=2, dim=-1, keepdim=True)
+        for k in model_outputs.keys():
+            model_outputs[k] = model_outputs[k]/model_outputs[k].norm(p=2, dim=-1, keepdim=True)
 
     return model_outputs, lang_ids
 
@@ -495,7 +497,6 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         image_model.train()
         aux_losses = None
         for i, (image_input, audio_input) in enumerate(train_loader):
-            break
             batch_start_time = time.time()
 
             ### Prepare input
@@ -520,12 +521,14 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             global_step += 1
             # Display current progress
             if not args.no_pbar:
-                pbar_update( i,
-                             batches_per_epoch,
-                             epoch_loss_meter,
-                             aux_losses=aux_losses,
-                             report_mem_usage=report_mem_usage,
-                             cur_lr=cur_lr)
+                num_stat_lines = pbar_update( i,
+                                     batches_per_epoch,
+                                     epoch_loss_meter,
+                                     aux_losses=aux_losses,
+                                     report_mem_usage=report_mem_usage,
+                                     cur_lr=cur_lr)
+            else:
+                num_stat_lines =0
 
             # Optional mid epoch report
             if i % args.n_print_steps == 0:
@@ -533,12 +536,13 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
                 tot_time = time.time()-start_time
                 mid_epoch_training_report(epoch, batches_per_epoch, loss_meter,
                                           epoch_loss_meter, i, batch_timer,
-                                          epoch_time, tot_time, cur_lr,
+                                          epoch_time, tot_time, cur_lr, num_stat_lines,
                                           args)
 
             # Chech if training went off the rails
             if np.isnan(loss_meter.avg):
-                print("TRAINER: training diverged...")
+                print(f"\x1B[{num_stat_lines}E", end="")
+                print("TRAINER: training diverged...", flush=True)
                 return
 
             # Free up VRAM memory explicitly
