@@ -3,28 +3,29 @@
 # Original Author: Wei-Ning Hsu
 # Augmented by: Chris Crabtree
 
-# This moves the cursor down 20 rows after the shell exits or error occurs. Helps to save progress display info on ctrl-c
+# This moves the cursor down 15 rows after the shell exits or error occurs. Helps to save progress display info on ctrl-c
 trap 'printf "\x1b[20E"' err exit
 
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="$SCRATCH/debug_exps/test"
+EXPDIR="$SCRATCH/exps/MV_CODING_AVG_ANCHOR"
+
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="4,5"
+devs_to_use=""
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
 extra_args=( "--batch-size=128" "--n-epochs=75" "--mode=train" "--langs=english,hindi,japanese" )
-extra_args+=( "--lr=.001" "--lr-ramp=0.001")
+extra_args+=( "--lr=.001" "--lr-ramp=0.1")
 # extra_args+=("--weight-decay=0.0")
 # extra_args+=("--clip-grad=50.0")
 
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg")
-extra_args+=("--validate-full-graph" "--n-print-steps=100")
+extra_args+=("--validate-full-graph" "--n-print-steps=200")
 
 extra_args+=("--loss=multiview_coding"  )
 

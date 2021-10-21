@@ -195,8 +195,24 @@ def get_train_parser(parser=None):
     parser.add_argument('--loss', type=str, default='multiview_coding',
             choices=['triplet', 'triplet_w_hardneg','multiview_coding','hyperspheric', 'masked_margin_sm'],
             help='Loss function to use')
+    parser.add_argument('--clip-grad', type=float, default=1e10,
+            help='Cap gradient at specified level. Default is extremely high (1e10).')
     parser.add_argument('--full-graph', action="store_true",
             help='Use every modality pair for contrastive loss (rather than using images as the anchor)')
+    parser.add_argument('--use-avg-anchor', action="store_true",
+            help='Use the avg of all modality embeddings as the anchor')
+    parser.add_argument('--use-avg-others-contrast', action="store_true",
+            help='Use the avg of all other modality embeddings as contrast')
+    parser.add_argument('--custom-unif-sim', default="na", 
+            choices=['na', 'cosine', 'dot'],
+            help='Similarity measure to use in custom uniformity loss. '+
+                 'Default: "na"')
+    parser.add_argument('--custom-unif-loss', default="na", 
+            choices=['na', 'unif_ce', 'gauss_kern', 'hsphere'],
+            help='Loss measure to use in custom uniformity loss. Called on the output of the similarity measure. '+
+                 'Default: "na"')
+    parser.add_argument('--detach-anchor', action="store_true",
+            help='Detach anchor from graph. May help with collapse')
     parser.add_argument('--validate-full-graph', action="store_true",
             help='Use every modality pair in the validation output')
     parser.add_argument('--use-custom-hsphere', action="store_true",
