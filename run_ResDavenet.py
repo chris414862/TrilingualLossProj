@@ -11,8 +11,10 @@ import warnings
 from collections import OrderedDict
 
 import dataloaders
-from steps.traintest import train, validate
+from steps.train import train
+from steps.validation import validate
 from run_utils import str2bool, set_seeds, create_audio_model, create_image_model, load_state_dict
+from steps.utils.general_utils import MAX_GRAD
 from run_display_utils import my_model_summary
 
 
@@ -33,13 +35,21 @@ def load_args(old_args, exp_dir):
 
 
 def load_dataloaders(data_train, data_val, batch_size, num_workers, args: argparse.Namespace):
-    train_dset = dataloaders.ImageCaptionDatasetHDF5(data_train)
+    if args.dummy_data:
+        train_dset = dataloaders.DummyDataset()
+    else:
+        train_dset = dataloaders.ImageCaptionDatasetHDF5(data_train)
     
     if args.dev_eval is not None:
+        print(f"RUNSCRIPT: Creating DEV set for evaluation. {args.dev_eval} samples taken from train set for DEV set.", flush=True)
         dev_set_size = args.dev_eval
         train_dset, val_dset = train_dset.create_dev_set(dev_set_size, dev_set_confs={'image':{'center_crop':True}})
 
+    elif args.dummy_data:
+        print(f"RUNSCRIPT: Using DUMMY set for evaluation", flush=True)
+        val_dset = dataloaders.DummyDataset()
     else: # Use test set
+        print(f"RUNSCRIPT: Using TEST set for evaluation", flush=True)
         val_dset = dataloaders.ImageCaptionDatasetHDF5(
                 data_val, image_conf={'center_crop':True})
         
@@ -64,7 +74,7 @@ def load_state_dicts(audio_models, image_model, seed_dir, seed_epoch):
     else:
         for lang_id in audio_models.keys():
             audio_states = torch.load(
-                    '%s/models/best_%s_audio_model.pth' % (seed_dir, lang_id,seed_epoch))
+                    '%s/models/best_%s_audio_model.pth' % (seed_dir, lang_id))#,seed_epoch))
         # audio_states = torch.load(
         #         '%s/models/best_audio_model.pth' % seed_dir)
         image_states = torch.load(
@@ -82,6 +92,10 @@ def get_default_parser(parser=None):
                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     # ResDavenet args
+    parser.add_argument('--use-cpu', action="store_true",
+            help="Use cpu instead of gpu(s).")
+    parser.add_argument('--dummy-data', action="store_true",
+            help="Use dummy data for faster debugging setup")
     parser.add_argument('--audio-model', type=str, default='ResDavenet', 
             choices=['ResDavenetVQ', 'ResDavenet'], help='audio model architecture')
     parser.add_argument('--image-model', type=str, default='Resnet50', 
@@ -192,15 +206,19 @@ def get_train_parser(parser=None):
     parser.add_argument('--dev-eval', type=int,
             help='Use dev set for evaluation, rather than test set. '+
             f'Must give integer to specify dev set size.')
-    parser.add_argument('--loss', type=str, default='multiview_coding',
-            choices=['triplet', 'triplet_w_hardneg','multiview_coding','hyperspheric', 'masked_margin_sm'],
+    parser.add_argument('--loss', type=str, default='info_nce',
+            choices=['triplet', 'triplet_w_hardneg','info_nce','hyperspheric', 'masked_margin_sm'],
             help='Loss function to use')
-    parser.add_argument('--clip-grad', type=float, default=1e10,
+    parser.add_argument('--use-hard-neg', action="store_true",
+            help='Use negative samples that are close to the correct target.')
+    parser.add_argument('--clip-grad', type=float, default=MAX_GRAD,
             help='Cap gradient at specified level. Default is extremely high (1e10).')
     parser.add_argument('--full-graph', action="store_true",
             help='Use every modality pair for contrastive loss (rather than using images as the anchor)')
     parser.add_argument('--use-avg-anchor', action="store_true",
             help='Use the avg of all modality embeddings as the anchor')
+    parser.add_argument('--use-img-anchor', action="store_true",
+            help='Use the image modality embeddings as the anchor')
     parser.add_argument('--use-avg-others-contrast', action="store_true",
             help='Use the avg of all other modality embeddings as contrast')
     parser.add_argument('--custom-unif-sim', default="na", 
@@ -268,7 +286,7 @@ def get_run_parser(parser=None):
 
 if __name__ == '__main__':
     print('I am process %s, running on %s: starting (%s)' % (
-            os.getpid(), os.uname()[1], time.asctime()))
+            os.getpid(), os.uname()[1], time.asctime()), flush=True)
     
     parser = get_default_parser()
     parser = get_train_parser(parser)
@@ -301,6 +319,7 @@ if __name__ == '__main__':
             data_train, data_val, args.batch_size, args.num_workers, args)
 
 
+    print("RUNSCRIPT: Loading models...", flush=True)
     lang_ids = [lang.strip().lower() for lang in args.langs.split(",")]
     audio_models = dict()
     for lang_id in lang_ids:
@@ -315,10 +334,10 @@ if __name__ == '__main__':
                 args.no_scale_pe)
     image_model = create_image_model(args.image_model, args.pretrained_image_model, args.image_output_head, args.no_scale_pe)
     
-    image_model_input, audio_model_input_dict = train_dset.__getitem__(0)
-    audio_model_input_shape = audio_model_input_dict["english"]["lmspecs"].shape #this doesn't include batch dimension
-    image_model_input_shape = image_model_input.shape 
     if args.print_summary: # prints info about each layer and expected memory requirements
+        image_model_input, audio_model_input_dict = train_dset.__getitem__(0)
+        audio_model_input_shape = audio_model_input_dict["english"]["lmspecs"].shape #this doesn't include batch dimension
+        image_model_input_shape = image_model_input.shape 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore",category=UserWarning)
 
@@ -337,7 +356,7 @@ if __name__ == '__main__':
     
         if not resume:
             print('RUNSCRIPT: Creating experiment directory: %s' % exp_dir)
-            os.makedirs('%s/models' % exp_dir, exist_ok=True)
+            os.makedirs('%s/models' % exp_dir)#, exist_ok=True)
             with open('%s/args.pkl' % exp_dir, 'wb') as f:
                 pickle.dump(args, f)
     

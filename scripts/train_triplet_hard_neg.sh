@@ -9,57 +9,41 @@ trap 'printf "\x1b[20E"' err exit
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="$SCRATCH/debug_exps/test"
+EXPDIR="$SCRATCH/exps/AVG_HEAD_TRIPLET_HARD_NEG"
+
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="0,5"
+devs_to_use=""
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=1
 
 #### Set python training programs defualt arguments
-## TRAINING ARGS
-extra_args=(  "--mode=train" "--langs=english,hindi,japanese" )
-extra_args+=( "--batch-size=128" "--n-epochs=75" "--lr=.1" "--lr-ramp=0.001")
+extra_args=( "--batch-size=128" "--n-epochs=75" "--mode=train" "--langs=english,hindi,japanese" )
+extra_args+=( "--lr=.0002" "--lr-ramp=0.1")
 # extra_args+=("--weight-decay=0.0")
 # extra_args+=("--clip-grad=50.0")
-# extra_args+=("--use-cpu")
-# extra_args+=("--dummy-data")
 
-## PRETRAINING ARGS
-# extra_args+=("--pretrained-image-model=False")
-
-## VALIDATION ARGS
-extra_args+=("--validate-full-graph")
-
-## DISPLAY ARGS
-extra_args+=("--n-print-steps=100")
-#"--no-pbar") 
-
-## ARCHITECTURE ARGS
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg")
-# extra_args+=("--image-output-head=mh_attn" "--audio-output-head=mh_attn")
+extra_args+=("--validate-full-graph" "--n-print-steps=200")
 
-## TRIPLET LOSS ARGS
-# extra_args+=("--loss=triplet"  )
-# extra_args+=("--use-hard-neg"  )
+extra_args+=("--loss=triplet"  )
+extra_args+=("--use-hard-neg"  )
 
-## INFONCE LOSS ARGS
-extra_args+=("--loss=info_nce")
+# extra_args+=("--loss=multiview_coding"  )
 
-# # HYPERSPHERIC LOSS ARGS
-# # --use-custom-hsphere should be set with hyperspheric. I don't use the original implementation anymore
-# # custom just refers to calculating the uniformity loss once for each view rather than for each pairing
+## use-custom-hsphere should be set with hyperspheric. I don't use the original implementation anymore
+## custom just refers to calculating the uniformity loss once for each view rather than for each pairing
 # extra_args+=("--loss=hyperspheric" "--use-custom-hsphere" "--hsphere-alpha=2.0" "--hsphere-t=2.0" )
 # extra_args+=("--hsphere-align-weight=1.0" "--hsphere-uniform-weight=.75" "--hsphere-alpha=2.0" "--hsphere-t=2.0")
 
-## ALIGNMENT/CONTRANSTING ARGS
 extra_args+=("--full-graph")
-# extra_args+=("--use-img-anchor")
 # extra_args+=( "--use-avg-anchor" )
 # extra_args+=( "--use-avg-others-contrast" )
 
 
+#"--use-custom-hsphere")
+#"--no-pbar") 
 
 #### Set script constants
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -167,6 +151,7 @@ fi
 echo ""
 echo "----------------$TRAIN_SCRIPT Arguments-------------------"
 printf "$fmt_str" "Experiment directory:" "$expdir"
+printf "$fmt_str" "Mode:" "$MODE"
 printf "$fmt_str" "Training data json:" "$DATA_TR"
 printf "$fmt_str" "Validation data json:" "$DATA_VAL"
 echo "Remaining arguments for $TRAIN_SCRIPT: "

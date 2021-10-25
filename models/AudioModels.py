@@ -173,6 +173,7 @@ class ResDavenet(nn.Module):
                                        curr_nframes) # prevent div by 0
         else:
             curr_nframes = nframes
+
         x = self.head_layer(x, nframes=curr_nframes)
         
         if check_tensor(x, view_id, "output CHECK"):
