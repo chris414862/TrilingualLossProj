@@ -125,8 +125,6 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         image_model.train()
         aux_losses = None
         for i, (image_input, audio_input) in enumerate(train_loader):
-            if i > 5:
-                break
             batch_start_time = time.time()
 
             ### Prepare input
