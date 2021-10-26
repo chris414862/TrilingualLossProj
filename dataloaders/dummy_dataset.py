@@ -3,10 +3,11 @@ import numpy as np
 from torch.utils.data import Dataset
 
 class DummyDataset(Dataset):
-    def __init__(self, image_dims=[3,220,220], audio_dims=[42, 101]):
+    def __init__(self, image_dims=[3,220,220], audio_dims=[42, 101], size=10000):
         self.lang_ids = ["japanese", "english", "hindi"]
         self.image_dims = image_dims
         self.audio_dims = audio_dims
+        self.size = size
         print(f"DUMMY_DATALOADER: ")
 
     def __getitem__(self,index):
@@ -21,7 +22,7 @@ class DummyDataset(Dataset):
         return image_data, audio_data
 
     def __len__(self):
-        return 10000
+        return self.size
 
 
 

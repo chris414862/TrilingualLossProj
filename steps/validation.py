@@ -1,6 +1,10 @@
 import torch
+import torch.nn as nn
+import time
+from collections import defaultdict
 
-from .utils.report_utils import curate_and_print_recalls
+from .utils.validation_utils import curate_and_print_recalls, curate_and_print_recalls
+from .utils.general_utils import get_target_multiling_data
 
 
 
@@ -28,7 +32,7 @@ def validate(image_model,audio_models, val_loader, device, args):
         for i, (image_input, audio_input) in enumerate(val_loader):
             # Prep batch. Audio is put on 'device' in method
             target_audio_input  = get_target_multiling_data(audio_input, device, args)
-            image_input = image_input.to(device)
+            image_input = image_input.to(device).type(torch.float32)
 
             # compute audio output
             image_output = image_model(image_input)
@@ -56,68 +60,9 @@ def validate(image_model,audio_models, val_loader, device, args):
             if args.validate_full_graph: # Compute all pairs
                 for j in range(i+1, len(lang_ids)):
                     audio_output2 = torch.cat(A_embeddings[lang_ids[j]])
-                    best_r10 = curate_and_print_results(audio_output, audio_output2, all_recalls, view1_id=lang_ids[i], view2_id=lang_ids[j], best_r10=best_r10)
+                    best_r10 = curate_and_print_recalls(audio_output, audio_output2, all_recalls, view1_id=lang_ids[i], view2_id=lang_ids[j], best_r10=best_r10)
 
     return all_recalls, best_r10
 
 
-def calc_recalls(S, view1="", view2=""):
-    """
-    Computes recall at 1, 5, and 10 given a similarity matrix S.
-    By convention, rows of S are assumed to correspond to images (view1) and columns are captions (view2).
-    """
-    assert(S.dim() == 2)
-    assert(S.size(0) == S.size(1))
-    if isinstance(S, torch.autograd.Variable):
-        S = S.data
-    n = S.size(0)
-    v1_v2_scores, v1_v2_ind = S.topk(10, 1)#along the v2 dimension
-    v2_v1_scores, v2_v1_ind = S.topk(10, 0)#along the v1 dimension
-    v1_r1 = AverageMeter()
-    v1_r5 = AverageMeter()
-    v1_r10 = AverageMeter()
-    v2_r1 = AverageMeter()
-    v2_r5 = AverageMeter()
-    v2_r10 = AverageMeter()
-    for i in range(n):
-        v1_foundind = -1
-        v2_foundind = -1
-        for ind in range(10):
-            if v2_v1_ind[ind, i] == i:
-                v1_foundind = ind
-            if v1_v2_ind[i, ind] == i:
-                v2_foundind = ind
-        # do r1s
-        if v2_foundind == 0:
-            v2_r1.update(1)
-        else:
-            v2_r1.update(0)
-        if v1_foundind == 0:
-            v1_r1.update(1)
-        else:
-            v1_r1.update(0)
-        # do r5s
-        if v2_foundind >= 0 and v2_foundind < 5:
-            v2_r5.update(1)
-        else:
-            v2_r5.update(0)
-        if v1_foundind >= 0 and v1_foundind < 5:
-            v1_r5.update(1)
-        else:
-            v1_r5.update(0)
-        # do r10s
-        if v2_foundind >= 0 and v2_foundind < 10:
-            v2_r10.update(1)
-        else:
-            v2_r10.update(0)
-        if v1_foundind >= 0 and v1_foundind < 10:
-            v1_r10.update(1)
-        else:
-            v1_r10.update(0)
 
-    recalls = defaultdict(dict)
-    recalls.update({view2+"->"+view1:{'r1':v2_r1.avg, 'r5':v2_r5.avg, 'r10':v2_r10.avg},
-           view1+"->"+view2:{'r1':v1_r1.avg, 'r5':v1_r5.avg, 'r10':v1_r10.avg}})
-                #'A_meanR':A_meanR.avg, 'I_meanR':I_meanR.avg}
-
-    return recalls

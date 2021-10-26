@@ -19,12 +19,13 @@ skip_arg_check=1
 
 #### Set python training programs defualt arguments
 ## TRAINING ARGS
-extra_args=(  "--mode=train" "--langs=english,hindi,japanese" )
-extra_args+=( "--batch-size=128" "--n-epochs=75" "--lr=.1" "--lr-ramp=0.001")
+extra_args=(  "--mode=train" "--langs=english,hindi")
+#,japanese" )
+extra_args+=( "--batch-size=8" "--n-epochs=1" "--lr=.1" "--lr-ramp=0.001")
 # extra_args+=("--weight-decay=0.0")
 # extra_args+=("--clip-grad=50.0")
 # extra_args+=("--use-cpu")
-# extra_args+=("--dummy-data")
+extra_args+=("--dummy-data")
 
 ## PRETRAINING ARGS
 # extra_args+=("--pretrained-image-model=False")
@@ -33,7 +34,7 @@ extra_args+=( "--batch-size=128" "--n-epochs=75" "--lr=.1" "--lr-ramp=0.001")
 extra_args+=("--validate-full-graph")
 
 ## DISPLAY ARGS
-extra_args+=("--n-print-steps=100")
+extra_args+=("--n-print-steps=2")
 #"--no-pbar") 
 
 ## ARCHITECTURE ARGS

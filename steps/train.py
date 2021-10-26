@@ -1,9 +1,6 @@
 # Author: David Harwath, Wei-Ning Hsu
-
-import datetime
 import numpy as np
 import pickle
-import shutil
 import time
 import torch
 import torch.nn as nn
@@ -18,11 +15,13 @@ from models.quantizers import compute_perplexity
 # from .util import *
 # from .util2 import InfoNCE_loss
 from .utils.setup_utils import get_loss_function, get_loss_framework, prepare_models, setup_optimizer
-from .utils.report_utils import report_initial_info, report_epoch_info, mid_epoch_training_report
-from .utils.general_utils import (collect_gradient_from_opt, get_trainable_params, AverageMeter, 
-                                  adjust_learning_rate, get_target_multiling_data, free_mem,MAX_GRAD)
+from .utils.report_utils import (report_initial_info, report_epoch_info, mid_epoch_training_report,
+                                 epoch_fin_report, training_fin_report)
+from .utils.general_utils import (check_gradient, AverageMeter, adjust_learning_rate, 
+                                  get_target_multiling_data, free_mem, MAX_GRAD)
 from .utils.load_save_utils import load_state, init_progress, update_progress, save_state_and_progress
 from .utils.pbar import pbar_update
+from .validation import validate
 
 
 from math import ceil
@@ -59,14 +58,6 @@ from collections import defaultdict, Counter, OrderedDict
 #     msg += num_to_str(nums[-1])
 #     msg += ')'
 #     return msg
-
-
-
-
-
-
-
-
 
 
 
@@ -134,10 +125,12 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         image_model.train()
         aux_losses = None
         for i, (image_input, audio_input) in enumerate(train_loader):
+            if i > 5:
+                break
             batch_start_time = time.time()
 
             ### Prepare input
-            image_input = image_input.to(device).float()
+            image_input = image_input.to(device).type(torch.float32)
             target_audio_input = get_target_multiling_data(audio_input, device, args)
 
             # Compute loss
@@ -150,17 +143,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             loss.backward()
 
             # Check Gradient size
-            grad_norm = collect_gradient_from_opt(optimizer, normalize=True)
-            warning_size = 100
-            if grad_norm > warning_size or grad_norm > args.clip_grad:
-                print(f"TRAINER: WARNING: (epoch step {i+1}) Gradient norm has become very large({grad_norm:.3f})).", end=" ")
-                # Clip Gradient
-                if args.clip_grad < MAX_GRAD:
-                    print(f"Clipping to {args.clip_grad:.2}.")
-                    params = get_trainable_params(optimizer)
-                    torch.nn.utils.clip_grad_norm_(params, args.clip_grad)
-                else:
-                    print()
+            check_gradient(optimizer, i, args)
 
             # Make update
             optimizer.step()
@@ -233,10 +216,18 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         save_state_and_progress(exp_dir, image_model, audio_models, optimizer, epoch, progress_df,
                    is_best_acc=(epoch == best_epoch), args=args)
 
-        print('TRAINER: Finished epoch %d. Time elapsed in epoch = %.fs. Average epoch time = %.fs. '
-              'Total time elapsed = %.fs. Current Time = %s' % (
-              epoch, epoch_timer.val, epoch_timer.avg, total_time_elapsed, datetime.datetime.now()))
+        epoch_fin_report(epoch, epoch_timer, total_time_elapsed)
         epoch += 1
 
-    print('TRAINER: Finished training. best_epoch = %s, best_acc = %s'
-          % (best_epoch, best_acc))
+    training_fin_report(best_epoch, best_acc)
+
+
+
+
+
+
+
+
+
+
+

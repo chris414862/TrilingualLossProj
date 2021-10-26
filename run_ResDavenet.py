@@ -47,7 +47,7 @@ def load_dataloaders(data_train, data_val, batch_size, num_workers, args: argpar
 
     elif args.dummy_data:
         print(f"RUNSCRIPT: Using DUMMY set for evaluation", flush=True)
-        val_dset = dataloaders.DummyDataset()
+        val_dset = dataloaders.DummyDataset(size=100)
     else: # Use test set
         print(f"RUNSCRIPT: Using TEST set for evaluation", flush=True)
         val_dset = dataloaders.ImageCaptionDatasetHDF5(

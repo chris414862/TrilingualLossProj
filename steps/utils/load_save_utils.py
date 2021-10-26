@@ -1,3 +1,6 @@
+import torch
+import shutil
+
 
 def load_state(exp_dir, audio_models, image_model, device):
     (progress, epoch, global_step, best_epoch,

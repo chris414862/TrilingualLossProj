@@ -8,22 +8,51 @@ import torch.nn as nn
 import sys
 from collections import defaultdict, OrderedDict
 
+###################
+#### Constants ####
+###################
 EPSILON=1e-15
 MAX_GRAD = 1e10
 
 
-def free_mem(loss, aux_losses, model_outputs):
-    # Free up VRAM memory explicitly
-    del loss
-    if aux_losses is not None:
-        for al in aux_losses.values():
-            if isinstance(al, dict):
-                for sub_al in al.values():
-                    del sub_al
-            else:
-                del al
-    for output in model_outputs.values():
-        del output
+#############################
+#### Parameter Functions ####
+#############################
+
+def get_param_norm(optimizer):
+    params = []
+    for param_group in optimizer.param_groups:
+        params.extend([t.flatten() for t in param_group["params"] if t is not None])
+        
+    flat_params = torch.cat(params, dim=-1)
+
+    return flat_params.norm(p=2, dim=-1)
+
+
+def get_trainable_params(optimizer):
+    params = []
+    for param_group in optimizer.param_groups:
+        params.extend(param_group["params"])
+    return params
+        
+
+#######################
+### Gradient Funcs ####
+#######################
+
+def check_gradient(optimizer, epoch_step, args):
+    grad_norm = collect_gradient_from_opt(optimizer, normalize=True)
+    warning_size = 100
+    if grad_norm > warning_size or grad_norm > args.clip_grad:
+        print(f"TRAINER: WARNING: (epoch step {epoch_step+1}) Gradient norm has become very large({grad_norm:.3f})).", end=" ")
+        # Clip Gradient
+        if args.clip_grad < MAX_GRAD:
+            print(f"Clipping to {args.clip_grad:.2}.")
+            params = get_trainable_params(optimizer)
+            torch.nn.utils.clip_grad_norm_(params, args.clip_grad)
+        else:
+            print()
+
 
 def collect_gradient_from_models(audio_models, image_model, normalize=True):
     model_gradients = OrderedDict()
@@ -63,6 +92,10 @@ def collect_gradient_from_opt(optimizer, normalize=False):
 
     return ret
 
+
+##############################################
+#### Model Input/Output Calculation Funcs ####
+##############################################
 
 def compute_avg_views(model_outputs:iter):
     avg_tens = None
@@ -110,15 +143,51 @@ def get_target_multiling_data(full_audio_input, device, args):
     target_audio_input = defaultdict(dict)
     for lang in langs:
 
-        lmspecs = full_audio_input[lang]['lmspecs'].to(device).float()
+        lmspecs = full_audio_input[lang]['lmspecs'].to(device).type(torch.float32)
         # lmspecs dims: [batch, raw_audio_dim, time_steps]
-        nframes = full_audio_input[lang]['nframes'].to(device).float()
+        nframes = full_audio_input[lang]['nframes'].to(device).type(torch.float32)
+        # nframes dims: [batch, ]
 
         target_audio_input[lang].update({'lmspecs':lmspecs, 'nframes':nframes})
 
     return target_audio_input
 
+#######################################
+#### Learning Rate Scheduler Funcs ####
+#######################################
 
+
+def get_lr_steps_from_str(lr, lr_ramp, total_steps):
+    try:
+        lr_ramp_steps = int(lr_ramp)
+        return lr_ramp_steps
+    except ValueError as e:
+        pass
+
+    try:
+        lr_ramp_pct = float(lr_ramp)
+        if 0.0 <= lr <= 1.0:
+            return int(lr_ramp_pct*total_steps)
+
+    except ValueError as e:
+        raise ValueError("--lr-ramp must either be a positive integer or a float between .0 and 1.0.")
+
+
+def adjust_learning_rate(base_lr, lr_ramp, lr_decay, lr_decay_multiplier, optimizer, global_step, total_steps):
+    """Sets the learning rate to the initial LR decayed every lr_decay epochs"""
+    lr_ramp_steps = get_lr_steps_from_str(base_lr, lr_ramp, total_steps)
+
+    if global_step < lr_ramp_steps:
+        lr = base_lr * (global_step / lr_ramp_steps)
+    else:
+        lr = base_lr * (lr_decay_multiplier ** ((global_step - lr_ramp_steps) // lr_decay))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
+
+####################
+#### Misc Funcs ####
+####################
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -138,46 +207,19 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def get_lr_steps_from_str(lr, lr_ramp, total_steps):
-    try:
-        lr_ramp_steps = int(lr_ramp)
-        return lr_ramp_steps
-    except ValueError as e:
-        pass
-
-    try:
-        lr_ramp_pct = float(lr_ramp)
-        if 0.0 <= lr <= 1.0:
-            return int(lr_ramp_pct*total_steps)
-
-    except ValueError as e:
-        raise ValueError("--lr-ramp must either be a positive integer or a float between .0 and 1.0.")
-
-def adjust_learning_rate(base_lr, lr_ramp, lr_decay, lr_decay_multiplier, optimizer, global_step, total_steps):
-    """Sets the learning rate to the initial LR decayed every lr_decay epochs"""
-    lr_ramp_steps = get_lr_steps_from_str(base_lr, lr_ramp, total_steps)
-
-    if global_step < lr_ramp_steps:
-        lr = base_lr * (global_step / lr_ramp_steps)
-    else:
-        lr = base_lr * (lr_decay_multiplier ** ((global_step - lr_ramp_steps) // lr_decay))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return lr
+def free_mem(loss, aux_losses, model_outputs):
+    # Free up VRAM memory explicitly
+    del loss
+    if aux_losses is not None:
+        for al in aux_losses.values():
+            if isinstance(al, dict):
+                for sub_al in al.values():
+                    del sub_al
+            else:
+                del al
+    for output in model_outputs.values():
+        del output
 
 
-def get_param_norm(optimizer):
-    params = []
-    for param_group in optimizer.param_groups:
-        params.extend([t.flatten() for t in param_group["params"] if t is not None])
-        
-    flat_params = torch.cat(params, dim=-1)
-
-    return flat_params.norm(p=2, dim=-1)
 
 
-def get_trainable_params(optimizer):
-    params = []
-    for param_group in optimizer.param_groups:
-        params.extend(param_group["params"])
-    return params
