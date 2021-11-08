@@ -97,6 +97,7 @@ def collect_gradient_from_opt(optimizer, normalize=False):
 #### Model Input/Output Calculation Funcs ####
 ##############################################
 
+
 def compute_avg_views(model_outputs:iter):
     avg_tens = None
     for tens in model_outputs:
@@ -135,6 +136,22 @@ def get_model_outputs(image_model, image_input, audio_models:dict, target_audio_
 
 
 def get_target_multiling_data(full_audio_input, device, args):
+    """
+    Removes languages that will not be used in training
+
+    Returns:
+        model_outputs - (dict):
+            Dictionary containing tensors to be input into audio model(s). 
+            Structure:
+            {
+                lang_id1:{
+                    'lmspecs': torch.Tensor  #shape: [batch, max_seq_len, spectrogram_dim] 
+                    'nframes': torch.Tensor  #shape: [batch], Contains length of un-padded data
+                },
+                lang_id2:{
+                ....
+            }
+    """
     assert args.langs is not None
     langs = [lang.strip().lower() for lang in args.langs.split(",")]
     for lang in langs:
@@ -142,7 +159,6 @@ def get_target_multiling_data(full_audio_input, device, args):
 
     target_audio_input = defaultdict(dict)
     for lang in langs:
-
         lmspecs = full_audio_input[lang]['lmspecs'].to(device).type(torch.float32)
         # lmspecs dims: [batch, raw_audio_dim, time_steps]
         nframes = full_audio_input[lang]['nframes'].to(device).type(torch.float32)

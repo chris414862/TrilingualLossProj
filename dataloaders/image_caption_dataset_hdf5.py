@@ -141,10 +141,17 @@ class ImageCaptionDatasetHDF5(Dataset):
 
     def __getitem__(self, index):
         """
-        returns: image, audio, nframes
+        returns: image, audio
         where image is a FloatTensor of size (3, H, W)
-        audio is a FloatTensor of size (N_freq, N_frames) 
-        nframes is an integer
+        audio is a dict:
+            {
+                "english":{
+                    "lmspecs":numpy.ndarray #shape: (N_freq, max_frames)
+                    "nframes"::numpy.ndarray #shape: (1)
+                },
+                "japanese":{
+                ...
+            }
         """
         audio = self._get_audio(index)
         image = self._get_image(index)

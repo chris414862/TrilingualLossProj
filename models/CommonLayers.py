@@ -5,6 +5,33 @@ import numpy as np
 
 
 
+
+
+class BYOL_Layer(nn.Module):
+    def __init__(self, input_size, layer_output_sizes=[4096, 256]): 
+        super().__init__()
+        layers = self._make_seq_layers(input_size, layer_output_sizes)
+        self.seq_layer = nn.Sequential(*layers)
+
+    def _make_seq_layers(self, input_size, layer_output_sizes=[4096, 256]): 
+        layers = []
+        prev_size = input_size
+        for i, size in enumerate(layer_output_sizes):
+            layers.append(nn.Linear(prev_size, size))
+            # Last layer has no BatchNorm according to BYOL paper
+            if i == len(layer_output_sizes) -1:
+                layers.append(nn.BatchNorm2d(size))
+            layers.append(nn.Relu)
+            prev_size = size
+        
+        return layers
+
+
+    def forward(self, x):
+        return self.seq_layer(x)
+
+
+
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500, scaled=True):

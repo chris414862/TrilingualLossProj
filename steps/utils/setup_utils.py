@@ -4,6 +4,8 @@ from losses.funcs.InfoNCE import InfoNCE
 from losses.funcs.triplet import TripletLoss
 from losses.frameworks.hyperspheric import custom_hsphere_loss_computation
 from losses.frameworks.multiview_coding import multiview_contrastive_computation
+from models.CommonLayers import BYOL_Layer
+from .aux_nets_utils import prep_byol_aux_nets
 
 
 def get_loss_function(args):
@@ -34,6 +36,16 @@ def get_loss_framework(args):
         return multiview_contrastive_computation
 
 
+def get_byol_layer_sizes(args):
+    return [int(num) for num in args.byol_layer_sizes.split(",")]
+
+def get_final_layer_size(view_id, args):
+    if view_id == "img":
+        return int(args.edim)
+    else:
+        return int(args.layer_widths.split(",")[-1])
+
+
 def prepare_models(image_model, audio_models, device, args):
     if not isinstance(image_model, torch.nn.DataParallel) and not args.use_cpu and not args.dummy_data:
         image_model = nn.DataParallel(image_model)
@@ -45,33 +57,140 @@ def prepare_models(image_model, audio_models, device, args):
             audio_models[lang_id] = nn.DataParallel(audio_models[lang_id])
         audio_models[lang_id] = audio_models[lang_id].to(device)
 
-    return image_model, audio_models
+    # Prepare auxillary layers/networks
+    if args.loss == "byol":
+        view_ids = ["img"]+[k for k in audio_models.keys()]
+        aux_nets = prep_byol_aux_nets(view_ids)
+        
+    else:
+        aux_nets = None
 
+    return image_model, audio_models, aux_nets
 
-def setup_optimizer(image_model, audio_models, args):
-    # Gather trainable parameters
+def get_all_model_params(audio_models, image_model, aux_nets, args):
     audio_trainables = list()
-    for lang_id in audio_models.keys():
-        audio_trainables.extend([p for p in audio_models[lang_id].parameters() if p.requires_grad])
+    
+    # Audio encoders
+    if args.shared_audio_encoder == "na":
+        for lang_id in audio_models.keys():
+            audio_trainables.extend([p for p in audio_models[lang_id].parameters() if p.requires_grad])
+    else:
+        # Get params from only one (of any) audio models
+        any_key = [k for k in audio_models.keys()][0]
+        audio_trainables.extend([p for p in audio_models[any_key].parameters() if p.requires_grad])
+
+
+    # Image encoder
     if args.freeze_image_model:
         image_trainables = [p for n, p in image_model.named_parameters() \
                             if n.startswith('embedder')]
     else:
         image_trainables = [p for p in image_model.parameters() if p.requires_grad]
+
+    # Auxillary networks
+    if aux_nets is not None:
+        pass
     trainables = audio_trainables + image_trainables
-    print('TRAINER: Total %d trainable parameters' % len(trainables))
+    len_trainable_layers = len(trainables)
+    num_trainable_params = sum([torch.prod(torch.tensor(p.shape)) for p in trainables])
+
+
+    return trainables, len_trainable_layers, num_trainable_params
+
+def get_partitioned_model_params(audio_models, image_model, aux_nets, args):
+    """
+        Returns a dict of model params to create an optimizer with separate param groups.
+        Also returns global info about all params.
+
+        Returns:
+            trainables - (list): 
+                A list of dicts. Each dict contains the keys: "view_id" and "params"
+            num_trainable_layers - (int):
+                Total number of modules/layers in all models
+            num_trainable_params - (int):
+                Total number of parameters/floats in all models
+    """
+    trainables = list()
+    num_trainable_layers = 0
+    num_trainable_params = 0
+
+    # Language encoders 
+    for lang_id in audio_models.keys():
+        lang_trainables = [p for p in audio_models[lang_id].parameters() if p.requires_grad]
+        num_trainable_layers += len(lang_trainables)
+        num_trainable_params += sum([torch.prod(torch.tensor(p.shape)) for p in lang_trainables])
+        trainables.append({"params": lang_trainables, "view_id":lang_id})
+
+    # Image model parameters
+    if args.freeze_image_model:
+        img_trainables = [p for n, p in image_model.named_parameters() \
+                            if n.startswith('embedder')]
+    else:
+        img_trainables = [p for p in image_model.parameters() if p.requires_grad]
+
+    trainables.append({"params":img_trainables, "view_id":"img"})
+    num_trainable_layers += len(img_trainables)
+    num_trainable_params += sum([torch.prod(torch.tensor(p.shape)) for p in img_trainables])
+
+    # Auxillary networks (e.g. projection and prediction layers)
+    for view_type, view_type_dict in aux_nets.items():
+        for aux_net_view_id, aux_net_view_dict in view_type_dict.items():
+            # get view's param list in trainables
+            views_trainables = [d["params"] for d in trainables if d["view_id"] == aux_net_view_id][0]
+
+            # add view's params from auxillary networks to list
+            assert type(aux_net_view_dict["params"]) == list
+            views_trainables.extend(aux_net_view_dict["params"])
+
+
+
+
+    if args.loss == "byol":
+        # Freeze target view to do ema update. Keeping the param group in the optimizer for consistency 
+        target_param_group = [param_group for param_group in trainables if param_group["view_id"] == args.byol_target_view][0]
+        for param_tensor in target_param_group["params"]:
+            param_tensor.requires_grad = False
+
+
+    return trainables, num_trainable_layers, num_trainable_params
+
+
+def setup_optimizer(image_model, audio_models, aux_nets, args):
+    # Gather trainable parameters
+    if args.loss != "byol":
+        # lump all paramters together for optimization
+        trainables, len_trainable_layers, len_trainable_params = get_all_model_params(audio_models, image_model, aux_nets, args)
+        print(f'TRAINER: Total {len_trainable_layers} trainable layers/matrices. {len_trainable_params:,} trainable parameters')
+
+    else: 
+        # Create param groups. trainables is a list of dicts. 
+        trainables, len_trainable_layers, len_trainable_params = get_partitioned_model_params(audio_models, image_model, aux_nets,args)
+        print(f'TRAINER: Total {len_trainable_layers} trainable layers/matrices. {len_trainable_params:,} trainable parameters')
+        for d in trainables:
+            len_trainable_layers = len(d["params"])
+            len_trainable_params= sum([torch.prod(torch.tensor(p.shape)) for p in  d["params"]])
+            print(f'TRAINER: {d["view_id"]} total {len_trainable_layers} trainable layers/matrices. {len_trainable_params:,} trainable parameters')
 
     # Instantiate optimizer type
     if args.optim == 'sgd':
-        optimizer = torch.optim.SGD(trainables, args.lr,
-                                 momentum=args.momentum,
-                                 weight_decay=args.weight_decay)
+        optim_class = torch.optim.SGD 
+        # optimizer = torch.optim.SGD(trainables, args.lr,
+        #                          momentum=args.momentum,
+        #                          weight_decay=args.weight_decay)
+        kwargs = {"momentum":args.momentum}
         print('TRAINER: Using %s optimizer w/ lr: %f, momentum: %d, weight_decay: %f' % (args.optim, args.lr, args.momentum, args.weight_decay))
     elif args.optim == 'adam':
-        optimizer = torch.optim.Adam(trainables, args.lr,
-                                weight_decay=args.weight_decay)
+        optim_class = torch.optim.Adam
+
+        # optimizer = torch.optim.Adam(trainables, args.lr,
+                                # weight_decay=args.weight_decay)
+        kwargs = {}
         print('TRAINER: Using %s optimizer w/ lr: %f, weight_decay: %f' % (args.optim, args.lr, args.weight_decay))
     else:
         raise ValueError('Optimizer %s is not supported' % args.optim)
 
+    optimizer = optim_class(trainables, args.lr, weight_decay=args.weight_decay, **kwargs)
     return optimizer, trainables
+
+
+

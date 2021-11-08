@@ -16,37 +16,11 @@ class MyImageAvgLayer(nn.Module):
         dims = x.size(3)*x.size(2)
         x = x.sum(3).sum(2)/dims
         # x dims: [batch, embed_dim]
-        x = x
+        # x = x
         # x dims: [batch, embed_dim]
         return x
 
 
-# class MyImageSelfAttn(MySelfAttn):
-#     def __init__(self, **kwargs):
-#         super().__init__(**kwargs)
-#         
-#
-#     def forward(self, x):
-#         # x dims: [batch, embed_dim, height, width]
-#         x = x.flatten(-2)
-#         # x dims: [batch, embed_dim, height*width]
-#         x = x.transpose(1,2)
-#         # x dims: [batch, height*width, embed_dim]
-#         x = super().forward(x)
-#         # x dims: [batch, embed_dim]
-#         return x
-#
-# class MyImageResidual(nn.Module):
-#     def __init__(self, **kwargs):
-#         super().__init__()
-#         self.self_attn = MyImageSelfAttn(**kwargs)
-#         self.avg_output = MyImageAvgLayer()
-#
-#     def forward(self, x):
-#
-#         out = self.self_attn(x) + self.avg_output(x)
-#         print("REs out:", out.size())
-#         return out
 
 class Resnet50(imagemodels.ResNet):
     def __init__(self, embedding_dim=1024, pretrained=False, output_head="avg", scale_pe=True):
@@ -58,8 +32,8 @@ class Resnet50(imagemodels.ResNet):
         self.output_head_str = output_head
         self.fc = None
         self.embedder = nn.Conv2d(2048, embedding_dim, kernel_size=1, stride=1, padding=0)
-        self.ln_final = nn.LayerNorm(1024)
-        self.bn_final = nn.BatchNorm1d(1024)
+        # self.ln_final = nn.LayerNorm(1024)
+        # self.bn_final = nn.BatchNorm1d(1024)
         self.output_head = output_head
         # self.pool_func = nn.AdaptiveAvgPool2d((1, 1))
         if self.output_head_str == "avg":

@@ -519,7 +519,7 @@ def init_summary_info(module, parent_mod_summary, input_tuple, mod_var_name, dep
     summary["depth"] = depth
     # Input is stored as tuples containing posibly more than one tensor
     # For each layer store as list of lists: [[dim1, dim2,...], [dim1,dim2,...],...]
-    summary["input_shapes"] = [list(sub_input.size()) for sub_input in input_tuple if not sub_input is None]
+    summary["input_shapes"] = [list(sub_input.size()) for sub_input in input_tuple if type(sub_input) == torch.tensor]
     GLOBAL_LAYER_IDX += 1
     return summary
 
@@ -679,7 +679,10 @@ def get_stats_from_training_loop(model, batch_size, input_shape, dtype, device, 
     for i in range(loop_iters):
         print(i+1, end="\r", flush=True)
         x = torch.rand((batch_size, *input_shape)).type(dtype)
-        out = model(x)
+        if model_name == "Audio Model":
+            out = model(x, view_id="english")
+        else:
+            out = model(x)
         optimizer.zero_grad()
         l = (torch.sum(out[0])*0)
         l.backward()
@@ -775,7 +778,10 @@ def my_model_summary(model,
 
     # make a forward pass
     x = torch.rand((batch_size, *input_shape)).type(dtype)
-    out = model(x)
+    if model_name == "Audio Model":
+        out = model(x, view_id="english")
+    else:
+        out = model(x)
     # print(torch.cuda.memory_summary('cuda'))
     # print()
 

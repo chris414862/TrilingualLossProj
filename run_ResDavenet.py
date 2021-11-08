@@ -123,6 +123,10 @@ def get_default_parser(parser=None):
             help='ResDavenet layer/block sizes')
     parser.add_argument('--layer-depths', type=str, default='2,2,2,2', 
             help='ResDavenet depth of each residual block')
+    parser.add_argument('--use-lang-embed', action="store_true",
+            help="Append language id embeddings to each layer input in shared audio model")
+    parser.add_argument('--lang-embed-dim', type=int, default=8, 
+            help="Size of embedding to append to each layer input in shared audio model")
     parser.add_argument('--convsize', type=int, default=9,
             help='ResDavenet 1-D convolution width')
     parser.add_argument('--seed', type=int, default=8675309, help='Random seed')
@@ -156,6 +160,9 @@ def get_default_parser(parser=None):
                  'Default: "avg"')
     parser.add_argument('--no-scale-pe', action="store_true",
             help="Don't scale (by sqrt(d_model))in the positional embeddings layer")
+    parser.add_argument('--shared-audio-encoder', default="na",
+            choices=['na', 'basic'],
+            help="Use the same audio encoder for all languages.")
     parser.add_argument('--norm-outputs-in-loss', action="store_true",
             help="Normalize all model outputs before loss computation. Places all ouputs on the 'hypersphere'. "+
                  "If --loss=hypersheric is set, this will automatically be set to true.")
@@ -207,7 +214,7 @@ def get_train_parser(parser=None):
             help='Use dev set for evaluation, rather than test set. '+
             f'Must give integer to specify dev set size.')
     parser.add_argument('--loss', type=str, default='info_nce',
-            choices=['triplet', 'triplet_w_hardneg','info_nce','hyperspheric', 'masked_margin_sm'],
+            choices=['triplet', 'triplet_w_hardneg','info_nce','hyperspheric', 'masked_margin_sm', "byol"],
             help='Loss function to use')
     parser.add_argument('--use-hard-neg', action="store_true",
             help='Use negative samples that are close to the correct target.')
@@ -248,6 +255,11 @@ def get_train_parser(parser=None):
             help='adjust weighting to use in hyperspheric uniform sub-loss. Default: 1.0')
     parser.add_argument('--hsphere-align-weight', type=float, default=1.0,
             help='adjust weighting to use in hyperspheric align sub-loss. Default: 1.0')
+    parser.add_argument('--byol-layer-sizes', default="4096,256",
+            help='Output sizes for the internal Linear layers of the projection and prediction layers.')
+    parser.add_argument('--byol-target-view', default="img",
+            help='View to become "target" in byol nomenclature. The weights for the target view will be ubdated with ema.')
+
 
     return parser
 
@@ -322,8 +334,26 @@ if __name__ == '__main__':
     print("RUNSCRIPT: Loading models...", flush=True)
     lang_ids = [lang.strip().lower() for lang in args.langs.split(",")]
     audio_models = dict()
-    for lang_id in lang_ids:
-        audio_models[lang_id] = create_audio_model(
+    if args.shared_audio_encoder == "na":
+        assert not args.use_lang_embed, "--use-lang-embed only used when --shared-audio-encode is NOT 'na'"
+        for lang_id in lang_ids:
+            audio_models[lang_id] = create_audio_model(
+                    args.audio_model, 
+                    args.audio_feature_dim, 
+                    # args.VQ_sizes, 
+                    args.layer_widths, 
+                    args.layer_depths,
+                    # args.VQ_turnon, 
+                    args.convsize, 
+                    # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
+                    args.audio_output_head,
+                    args.no_scale_pe,
+                    args.use_lang_embed,
+                    lang_ids,
+                    args.lang_embed_dim)
+
+    else:
+        shared_model = create_audio_model(
                 args.audio_model, args.audio_feature_dim, 
                 # args.VQ_sizes, 
                 args.layer_widths, args.layer_depths,
@@ -331,8 +361,15 @@ if __name__ == '__main__':
                 args.convsize, 
                 # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
                 args.audio_output_head,
-                args.no_scale_pe)
-    image_model = create_image_model(args.image_model, args.pretrained_image_model, args.image_output_head, args.no_scale_pe)
+                args.no_scale_pe,
+                args.use_lang_embed,
+                lang_ids,
+                args.lang_embed_dim)
+
+        for lang_id in lang_ids:
+            audio_models[lang_id] = shared_model
+
+    image_model = create_image_model(args.image_model, args.pretrained_image_model, args.image_output_head, args.no_scale_pe, args.edim)
     
     if args.print_summary: # prints info about each layer and expected memory requirements
         image_model_input, audio_model_input_dict = train_dset.__getitem__(0)
@@ -344,7 +381,7 @@ if __name__ == '__main__':
             audio_m = [am for am in audio_models.values()][0]
             my_model_summary(audio_m, audio_model_input_shape, batch_size=args.batch_size,
                              mock_train4_mem_stats=args.mock_train4mem_stats, model_name="Audio Model")
-            my_model_summary(image_m, image_model_input_shape, batch_size=args.batch_size,
+            my_model_summary(image_model, image_model_input_shape, batch_size=args.batch_size,
                              mock_train4_mem_stats=args.mock_train4mem_stats, model_name="Image Model")
 
 

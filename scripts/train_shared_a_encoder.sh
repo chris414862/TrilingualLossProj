@@ -6,20 +6,21 @@
 # This moves the cursor down 20 rows after the shell exits or error occurs. Helps to save progress display info on ctrl-c
 trap 'printf "\x1b[20E"' err exit
 
+
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="debug_exps/test"
+EXPDIR="exps/SHARED_AUDIO_ENC_BASIC"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="6"
+devs_to_use="5,6"
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
-skip_arg_check=1
+skip_arg_check=0
 
 #### Set python training programs defualt arguments
 ## TRAINING ARGS
 extra_args=(  "--mode=train" "--langs=english,hindi,japanese" )
-extra_args+=( "--batch-size=128" "--n-epochs=1" "--lr=.001" "--lr-ramp=0.1")
+extra_args+=( "--batch-size=128" "--n-epochs=75" "--lr=.001" "--lr-ramp=0.1")
 # extra_args+=("--weight-decay=0.0")
 # extra_args+=("--clip-grad=50.0")
 
@@ -37,16 +38,12 @@ extra_args+=("--validate-full-graph")
 
 ## DISPLAY ARGS
 extra_args+=("--n-print-steps=200")
-# extra_args+=("--print-summary")
-# extra_args+=("--no-pbar") 
+#"--no-pbar") 
 
 ## ARCHITECTURE ARGS
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg")
 # extra_args+=("--image-output-head=mh_attn" "--audio-output-head=mh_attn")
 extra_args+=("--shared-audio-encoder=basic")
-
-## INPUT ARGS
-extra_args+=("--use-lang-embed")
 
 # # BYOL LOSS ARGS
 # extra_args+=("--loss=byol")
@@ -212,7 +209,6 @@ run_command="python $SCRIPT_DIR/../$TRAIN_SCRIPT \
 # Set available GPUs
 if [[ -n "$devs_to_use" ]]; then 
     export CUDA_VISIBLE_DEVICES=$devs_to_use  
-    export CUDA_LAUNCH_BLOCKING=1
 fi
 if [[ -z "$log_file" ]]; then
     # No double quotes around $run_command bc bash will interpret  

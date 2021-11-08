@@ -5,7 +5,8 @@ import pickle
 import random
 import torch
 
-from models.AudioModels import ResDavenetVQ, ResDavenet
+from models.AudioModels import  ResDavenet
+#,ResDavenetVQ,
 from models.ImageModels import Resnet50
 
 
@@ -32,32 +33,38 @@ def create_audio_model(audio_model_name, feat_dim,
                        # VQ_turnon, 
                        convsize, 
                        # VQ_commitment_cost, jitter, init_ema_mass, init_std, nonneg_init, 
-                       output_head, no_scale_pe):
+                       output_head, no_scale_pe,
+                       use_lang_embed,
+                       lang_ids,
+                       lang_embed_dim):
     layer_widths = [int(w) for w in layer_widths.split(',')]
     layer_depths = [int(w) for w in layer_depths.split(',')]
 
     # Load Models
-    if audio_model_name == 'ResDavenetVQ':
-        vq_sizes = [int(s) for s in VQ_sizes.split(',')]
-        vqs_enabled = [int(w) for w in VQ_turnon.split(',')]
-        audio_model = ResDavenetVQ(layers=layer_depths,
-                                   layer_widths=layer_widths,
-                                   convsize=convsize,
-                                   codebook_Ks=vq_sizes,
-                                   commitment_cost=VQ_commitment_cost,
-                                   jitter_p=jitter,
-                                   vqs_enabled=vqs_enabled,
-                                   init_ema_mass=init_ema_mass,
-                                   init_std=init_std,
-                                   nonneg_init=nonneg_init,
-                                   output_head=output_head)
-    elif audio_model_name == 'ResDavenet':
+    # if audio_model_name == 'ResDavenetVQ':
+    #     vq_sizes = [int(s) for s in VQ_sizes.split(',')]
+    #     vqs_enabled = [int(w) for w in VQ_turnon.split(',')]
+    #     audio_model = ResDavenetVQ(layers=layer_depths,
+    #                                layer_widths=layer_widths,
+    #                                convsize=convsize,
+    #                                codebook_Ks=vq_sizes,
+    #                                commitment_cost=VQ_commitment_cost,
+    #                                jitter_p=jitter,
+    #                                vqs_enabled=vqs_enabled,
+    #                                init_ema_mass=init_ema_mass,
+    #                                init_std=init_std,
+    #                                nonneg_init=nonneg_init,
+    #                                output_head=output_head)
+    if audio_model_name == 'ResDavenet':
         audio_model = ResDavenet(feat_dim=feat_dim,
                                  layers=layer_depths,
                                  layer_widths=layer_widths,
                                  convsize=convsize,
                                  output_head=output_head,
-                                 scale_pe= not no_scale_pe)
+                                 scale_pe= not no_scale_pe,
+                                 use_lang_embed=use_lang_embed,
+                                 lang_ids=lang_ids,
+                                 lang_embed_dim=lang_embed_dim)
 
     else:
         raise ValueError('Unknown audio model: %s' % audio_model_name)
@@ -65,10 +72,10 @@ def create_audio_model(audio_model_name, feat_dim,
     return audio_model
 
 
-def create_image_model(image_model_name, pretrained_image_model, output_head, no_scale_pe):
+def create_image_model(image_model_name, pretrained_image_model, output_head, no_scale_pe, edim):
     if image_model_name == 'Resnet50':
         image_model = Resnet50(pretrained=pretrained_image_model, output_head=output_head,
-                                 scale_pe=not no_scale_pe)
+                                 scale_pe=not no_scale_pe, embedding_dim=edim)
     else:
         raise ValueError('Unknown image model: %s' % image_model_name)
 

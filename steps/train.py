@@ -21,45 +21,12 @@ from .utils.general_utils import (check_gradient, AverageMeter, adjust_learning_
                                   get_target_multiling_data, free_mem, MAX_GRAD)
 from .utils.load_save_utils import load_state, init_progress, update_progress, save_state_and_progress
 from .utils.pbar import pbar_update
+from .utils.param_update_utils import param_update_step
 from .validation import validate
 
 
 from math import ceil
 from collections import defaultdict, Counter, OrderedDict
-
-
-# Made this global so it could be used in a signal handler
-# But pytorch doesn't pass along signal handlers to sub-processes in DataParallel (it seems)
-
-
-# def flprint(*args, **kwargs):
-#     print(*args, flush=True, **kwargs)
-#
-# def map_skip_none(fn, it):
-#     """
-#     emulate list(map(fn, it)) but leave None as it is.
-#     """
-#     ret = []
-#     for x in it:
-#         if x is None:
-#             ret.append(None)
-#         else:
-#             ret.append(fn(x))
-#     return ret
-#
-#
-# def numbers_to_str(nums, precision=3):
-#     msg = '('
-#     num_tmp = '%%.%df' % precision
-#     num_to_str = lambda x: (str(x) if x is None else num_tmp % x)
-#     for num in nums[:-1]:
-#         msg += num_to_str(num)
-#         msg += ', '
-#     msg += num_to_str(nums[-1])
-#     msg += ')'
-#     return msg
-
-
 
 
 def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, resume):
@@ -74,16 +41,16 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
     init_progress(progress)
 
     # Set device and maybe load snapshot
-
     device = torch.device("cuda" if torch.cuda.is_available() and not args.use_cpu else "cpu")
     torch.set_grad_enabled(True)
 
     # Setup the optimizer and models
-    optimizer, trainables = setup_optimizer(image_model, audio_models, args)
-    image_model, audio_models = prepare_models(image_model, audio_models, device, args)
+    image_model, audio_models, aux_nets = prepare_models(image_model, audio_models, device, args)
+    optimizer, trainables = setup_optimizer(image_model, audio_models, aux_nets, args)
 
     # Create/Load experiment
     if resume:
+        # TODO: Add aux net loading functionality
         progress, epoch, global_step, best_epoch, best_acc = load_state(exp_dir, audio_models, image_model, device)
     else:
         for lang_id in audio_models.keys():
@@ -122,9 +89,10 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
         # prep models for training
         for audio_model in audio_models.values():
             audio_model.train()
+
         image_model.train()
         aux_losses = None
-        for i, (image_input, audio_input) in enumerate(train_loader):
+        for i, (image_input, audio_input) in enumerate(train_loader): #DataLoader automatically converts np.ndarrays to tensors
             batch_start_time = time.time()
 
             ### Prepare input
@@ -134,7 +102,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             # Compute loss
             loss, aux_losses, model_outputs = loss_framework_func(
                                                             image_model, image_input, audio_models, target_audio_input,
-                                                             device, args, loss_func=loss_func)
+                                                             device, args, loss_func=loss_func, aux_nets=aux_nets)
 
             # Update parameters
             optimizer.zero_grad()
@@ -144,8 +112,7 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             check_gradient(optimizer, i, args)
 
             # Make update
-            optimizer.step()
-
+            param_update_step(optimizer, args)
 
             # Update statistics
             loss_meter.update(loss.item(), image_input.size(0))  #Averages over entire training run
