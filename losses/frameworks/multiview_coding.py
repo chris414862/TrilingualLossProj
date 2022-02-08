@@ -3,11 +3,11 @@ from collections import OrderedDict
 from steps.utils.aux_nets_utils import get_aux_nets_computation_func
 
 
-def compute_view_pair_loss(model_output1, model_output2, loss_func,  loss_record, view_pair_id, loss_weight=1.0, **extra_loss_kwargs):
+def compute_view_pair_loss(model_output1, model_output2, loss_func,  loss_record, view_pair_id, loss_weight=1.0, step=None, **extra_loss_kwargs):
     """
         Responsible for computing the contrastive loss and recording results.
     """
-    loss, aux_losses = loss_func(model_output1, model_output2, view_pair_id=view_pair_id, **extra_loss_kwargs)#, debug=True)
+    loss, aux_losses = loss_func(model_output1, model_output2, view_pair_id=view_pair_id, step=step, **extra_loss_kwargs)#, debug=True)
     loss = loss * loss_weight
     loss_record[view_pair_id] = OrderedDict()
     loss_record[view_pair_id]["total"] = loss
@@ -24,6 +24,7 @@ def compute_contrast(
                      current_view_id=None, current_view=None,
                      loss_func=None, loss_record=None, loss_weight=None, 
                      aux_nets=None, extra_loss_kwargs=None, view_pair_suffix=None,
+                     step=None
                      ):
     """
         This is basically a wrapper around compute_view_pair_loss. It is mainly responsible for computing
@@ -45,7 +46,7 @@ def compute_contrast(
                                                 )
 
     loss = compute_view_pair_loss(base_view, current_view, loss_func, loss_record, view_pair_id,
-                                  loss_weight=loss_weight, **extra_loss_kwargs)
+                                  loss_weight=loss_weight, step=step, **extra_loss_kwargs)
     return loss
 
 
@@ -82,7 +83,7 @@ def get_base_view(args, model_outputs, current_contrasting_view):
 
 def multiview_contrastive_computation(image_model, image_input, audio_models:dict, target_audio_input:dict, device, args,
                                       aux_nets=None, loss_weight=1.0, loss_func=None, model_outputs=None, view_ids=None,
-                                      view_pair_suffix="", **extra_loss_kwargs):
+                                      view_pair_suffix="", step=None, **extra_loss_kwargs):
     '''
        Logic for multilingual contrastive loss computation. We assume the image modality is the anchor
        unless the '--full-graph' argument is set
@@ -119,6 +120,7 @@ def multiview_contrastive_computation(image_model, image_input, audio_models:dic
                      current_view_id=current_contrasting_view_id, current_view=current_contrasting_view,
                      loss_func=loss_func, loss_record=loss_record, loss_weight=loss_weight, 
                      aux_nets=aux_nets, extra_loss_kwargs=extra_loss_kwargs,view_pair_suffix=view_pair_suffix,
+                     step=step
                      )
 
         tot_loss = tot_loss + loss
@@ -142,6 +144,7 @@ def multiview_contrastive_computation(image_model, image_input, audio_models:dic
                      current_view_id=current_contrasting_view_id, current_view=current_contrasting_view,
                      loss_func=loss_func, loss_record=loss_record, loss_weight=loss_weight, 
                      aux_nets=aux_nets, extra_loss_kwargs=extra_loss_kwargs,view_pair_suffix=view_pair_suffix,
+                     step=step
                      )
                 tot_loss = tot_loss + loss
 

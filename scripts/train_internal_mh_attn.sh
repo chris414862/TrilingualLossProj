@@ -8,19 +8,18 @@ trap 'printf "\x1b[20E"' err exit
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="debug_exps/test"
-# EXPDIR="exps/INFONCE_MH_ATTN_02_DO"
+EXPDIR="exps/MV_INTERNAL_MH_ATTN"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
 # If present, will restrict gpu usage. Ex. devs_to_use=4,6 will only use gpu 4 and gpu 6
-devs_to_use="4,6"
+devs_to_use="4,5"
 # If equal to 1, will bypass argument check and directly run $TRAIN_SCRIPT
 skip_arg_check=0
 
 #### Set python training programs defualt arguments
 ## TRAINING ARGS
 extra_args=(  "--mode=train" "--langs=english,hindi,japanese" )
-extra_args+=( "--batch-size=128" "--n-epochs=75" "--lr=.001" "--lr-ramp=0.1")
+extra_args+=( "--batch-size=128" "--n-epochs=75" "--lr=.0001" "--lr-ramp=0.1")
 # extra_args+=("--weight-decay=0.0")
 # extra_args+=("--clip-grad=50.0")
 
@@ -44,36 +43,27 @@ extra_args+=("--n-print-steps=200")
 ## ARCHITECTURE ARGS
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg")
 # extra_args+=("--image-output-head=mh_attn" "--audio-output-head=mh_attn")
-# extra_args+=("--image-output-head=transformer" "--audio-output-head=transformer" "--ff-dim=2048")
+# extra_args+=("--image-output-head=transformer" "--audio-output-head=transformer", "--ff-dim=2048")
 # extra_args+=("--padding-mask")
-# extra_args+=("--mh-dropout=.1")
-# extra_args+=("--internal-mh-attn")
-# extra_args+=("--dont-use-cls")
-extra_args+=("--shared-audio-encoder=basic")
+extra_args+=("--mh-dropout=.1")
+extra_args+=("--internal-mh-attn")
+extra_args+=("--dont-use-cls")
+# extra_args+=("--shared-audio-encoder=basic")
 
 ## INPUT ARGS
-extra_args+=("--lang-embed-type=chan")
+# extra_args+=("--lang-embed-type=chan")
 # extra_args+=("--lang-embed-type=seq")
 # extra_args+=("--lang-embed-type=feat")# Needs more than 2 GPUs
 
 # # BYOL LOSS ARGS
 # extra_args+=("--loss=byol")
 
-## MASKED MARGIN | margin = 1
-extra_args+=("--loss=masked_margin_sm")
-
-## Scheduled MASKED MARGIN
-extra_args+=("--loss=sched_masked_margin_sm")
-
-## Adaptive MASKED MARGIN
-extra_args+=("--loss=adapt_masked_margin_sm")
-
 ## TRIPLET LOSS ARGS
 # extra_args+=("--loss=triplet"  )
 # extra_args+=("--use-hard-neg"  )
 
 ## INFONCE LOSS ARGS
-# extra_args+=("--loss=info_nce")
+extra_args+=("--loss=info_nce")
 
 # # HYPERSPHERIC LOSS ARGS
 # # --use-custom-hsphere should be set with hyperspheric. I don't use the original implementation anymore

@@ -102,7 +102,8 @@ def train(audio_models, image_model, train_loader, test_loader, args, exp_dir, r
             # Compute loss
             loss, aux_losses, model_outputs = loss_framework_func(
                                                             image_model, image_input, audio_models, target_audio_input,
-                                                             device, args, loss_func=loss_func, aux_nets=aux_nets)
+                                                             device, args, loss_func=loss_func, aux_nets=aux_nets,
+                                                             step=global_step)
 
             # Update parameters
             optimizer.zero_grad()

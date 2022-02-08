@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as imagemodels
 import torch.utils.model_zoo as model_zoo
-from .CommonLayers import MyMHAttention
+from .CommonLayers import MyMHAttention, MyTransformer
 
 class MyImageAvgLayer(nn.Module):
     def __init__(self):
@@ -23,7 +23,7 @@ class MyImageAvgLayer(nn.Module):
 
 
 class Resnet50(imagemodels.ResNet):
-    def __init__(self, embedding_dim=1024, pretrained=False, output_head="avg", scale_pe=True):
+    def __init__(self, embedding_dim=1024, pretrained=False, output_head="avg", scale_pe=True, mh_dropout=.1, use_cls=True, args=None):
         super(Resnet50, self).__init__(imagemodels.resnet.Bottleneck, [3, 4, 6, 3])
         if pretrained:
             model_url = imagemodels.resnet.model_urls['resnet50']
@@ -39,7 +39,10 @@ class Resnet50(imagemodels.ResNet):
         if self.output_head_str == "avg":
             self.head_layer = self.avg_output
         elif self.output_head_str == "mh_attn":
-            self.head_layer = MyMHAttention(embedding_dim, nhead=8, seq_len=50, scale_pe=scale_pe)
+            self.head_layer = MyMHAttention(embedding_dim, nhead=8, seq_len=50, scale_pe=scale_pe, dropout=mh_dropout, use_cls=use_cls)
+        elif self.output_head_str == "transformer":
+            self.head_layer = MyTransformer(embedding_dim, nhead=8, seq_len=50, scale_pe=scale_pe, dropout=mh_dropout, use_cls=use_cls, 
+                                            dim_feedforward=args.ff_dim, padding_mask=False)
         # elif self.output_head == "custom_self_attn":
         #     self.residual_output = True
         #     self.num_heads = 8

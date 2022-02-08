@@ -27,18 +27,21 @@ def set_seeds(seed):
     torch.manual_seed(seed)
 
 
-def create_audio_model(audio_model_name, feat_dim, 
-                       # VQ_sizes, 
-                       layer_widths, layer_depths,
-                       # VQ_turnon, 
-                       convsize, 
-                       # VQ_commitment_cost, jitter, init_ema_mass, init_std, nonneg_init, 
-                       output_head, no_scale_pe,
-                       use_lang_embed,
-                       lang_ids,
-                       lang_embed_dim):
-    layer_widths = [int(w) for w in layer_widths.split(',')]
-    layer_depths = [int(w) for w in layer_depths.split(',')]
+def create_audio_model(args, lang_ids):
+        # audio_model_name, feat_dim, 
+        #                # VQ_sizes, 
+        #                layer_widths, layer_depths,
+        #                # VQ_turnon, 
+        #                convsize, 
+        #                # VQ_commitment_cost, jitter, init_ema_mass, init_std, nonneg_init, 
+        #                output_head, 
+        #                mh_dropout,
+        #                no_scale_pe,
+        #                lang_embed_type,
+        #                lang_ids,
+        #                lang_embed_dim):
+    layer_widths = [int(w) for w in args.layer_widths.split(',')]
+    layer_depths = [int(w) for w in args.layer_depths.split(',')]
 
     # Load Models
     # if audio_model_name == 'ResDavenetVQ':
@@ -55,16 +58,19 @@ def create_audio_model(audio_model_name, feat_dim,
     #                                init_std=init_std,
     #                                nonneg_init=nonneg_init,
     #                                output_head=output_head)
-    if audio_model_name == 'ResDavenet':
-        audio_model = ResDavenet(feat_dim=feat_dim,
+    if args.audio_model == 'ResDavenet':
+        audio_model = ResDavenet(feat_dim=args.audio_feature_dim,
                                  layers=layer_depths,
                                  layer_widths=layer_widths,
-                                 convsize=convsize,
-                                 output_head=output_head,
-                                 scale_pe= not no_scale_pe,
-                                 use_lang_embed=use_lang_embed,
+                                 convsize=args.convsize,
+                                 output_head=args.audio_output_head,
+                                 mh_dropout=args.mh_dropout,
+                                 scale_pe=not args.no_scale_pe,
+                                 lang_embed_type=args.lang_embed_type,
                                  lang_ids=lang_ids,
-                                 lang_embed_dim=lang_embed_dim)
+                                 lang_embed_dim=args.lang_embed_dim,
+                                 use_cls=not args.dont_use_cls,
+                                 args=args)
 
     else:
         raise ValueError('Unknown audio model: %s' % audio_model_name)
@@ -72,12 +78,18 @@ def create_audio_model(audio_model_name, feat_dim,
     return audio_model
 
 
-def create_image_model(image_model_name, pretrained_image_model, output_head, no_scale_pe, edim):
-    if image_model_name == 'Resnet50':
-        image_model = Resnet50(pretrained=pretrained_image_model, output_head=output_head,
-                                 scale_pe=not no_scale_pe, embedding_dim=edim)
+def create_image_model(args):
+    #image_model_name, pretrained_image_model, output_head, mh_dropout, no_scale_pe, edim):
+    #.image_model, args.pretrained_image_model, args.image_output_head, args.mh_dropout, args.no_scale_pe, args.edim)
+
+    if args.image_model == 'Resnet50':
+        image_model = Resnet50(pretrained=args.pretrained_image_model, output_head=args.image_output_head,
+                                 mh_dropout=args.mh_dropout,
+                                 scale_pe=not args.no_scale_pe, embedding_dim=args.edim,
+                                 use_cls=not args.dont_use_cls,
+                                 args=args)
     else:
-        raise ValueError('Unknown image model: %s' % image_model_name)
+        raise ValueError('Unknown image model: %s' % args.image_model)
 
     return image_model
 

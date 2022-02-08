@@ -3,28 +3,10 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-from .CommonLayers import MyMHAttention
+from .CommonLayers import MyMHAttention, MyTransformer, make_batch_mask
 
 from .quantizers import VectorQuantizerEMA, TemporalJitter
 
-def make_batch_mask(nframes, max_seq_len, device):
-    """
-        makes a mask for a single batch.
-
-        Parameters:
-        nframes (torch.Tensor [batch])
-            - Tensor containing the lengths of each sequence in batch
-    """
-    nframes = nframes[:, np.newaxis]
-    indices = torch.arange(max_seq_len, device=device)
-    bs = nframes.shape[0]
-    batch_indices = indices.expand(bs, max_seq_len).type(torch.float)
-    # batch_indices dims: [batch_size, max_seq_len]
-    bool_mask = torch.lt(batch_indices , nframes)
-    # bool_mask dims: [batch_size, max_seq_len]
-    float_mask = bool_mask.type(torch.float)
-
-    return float_mask
 
 
 class LangIdEmbedder(nn.Module):
@@ -120,53 +102,58 @@ def conv1d(in_planes, out_planes, width=9, stride=1, bias=False):
 
 class ResDavenet(nn.Module):
     def __init__(self, feat_dim=40, block=SpeechBasicBlock, layers=[2, 2, 2, 2],
-                 layer_widths=[128, 128, 256, 512, 1024], convsize=9, output_head="avg", 
-                 device=None, scale_pe=True, use_lang_embedding=False, lang_ids=None, lang_embed_dim=8, 
-                 use_lang_embed=False):
+                 layer_widths=[128, 128, 256, 512, 1024], convsize=9, output_head="avg", mh_dropout=.1,
+                 use_cls=True, device=None, scale_pe=True, lang_ids=None, lang_embed_dim=8, 
+                 lang_embed_type='na',args=None):
         assert(len(layers) == 4)
         assert(len(layer_widths) == 5)
         super(ResDavenet, self).__init__()
 
         self.output_head_str = output_head
-        self.use_lang_embed = use_lang_embed
+        self.lang_embed_type = lang_embed_type
         self.feat_dim = feat_dim # Spectrogram size
         self.lang_embed_dim = lang_embed_dim
         self.lang_ids = lang_ids
-        if self.use_lang_embed:
-            self.input_size = self.feat_dim + self.lang_embed_dim
+        self.input_size = self.feat_dim # Feat size of input into first conv1d layer
+        self.mh_dropout = mh_dropout
+        self.scale_pe = scale_pe
+        self.use_cls = use_cls
+        if self.lang_embed_type != 'na':
             self.input_embed_layer = LangIdEmbedder(len(self.lang_ids), self.lang_embed_dim)
             self.lang_id2idx = {lang_id:i for i, lang_id in enumerate(self.lang_ids)}
-            # layer_widths = layer_widths[:1] + [lw + self.lang_embed_dim for lw in layer_widths[1:-1]] + layer_widths[-1:]
-            print("New layer widths:", layer_widths)
+            self.input_size = self.feat_dim + self.lang_embed_dim
 
-        else:
-            self.input_size = self.feat_dim
             
-        self.inplanes = layer_widths[0]
 
-        # self.batchnorm1 = nn.BatchNorm2d(1)
+        self.inplanes = 1 # Channel size of input into current CNN layer
+        outplanes = layer_widths[0]
+        # if self.lang_embed_type == 'chan':
+        #     # Change channel size for next layer to adjust for language embedding
+        #     self.inplanes += self.lang_embed_dim
+        
 
 
-
-        self.conv1 = nn.Conv2d(1, self.inplanes, kernel_size=(self.input_size,1), # moves along the -1 dimension (i.e. the max_time_steps dim).
+        self.conv1 = nn.Conv2d(self.inplanes, outplanes, kernel_size=(self.input_size,1), # moves along the -1 dimension (i.e. the max_time_steps dim).
                                stride=1, padding=(0,0), bias=False)
-        self.bn1 = nn.BatchNorm2d(self.inplanes)
-        if self.use_lang_embed:
-            self.inplanes = layer_widths[0] + self.lang_embed_dim
 
+        self.bn1 = nn.BatchNorm2d(outplanes)
+
+        self.inplanes = outplanes # Channel size of input into current CNN layer
+        if self.lang_embed_type == 'chan':
+            self.inplanes = outplanes + self.lang_embed_dim
 
             
         self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self._make_layer(block, output_planes=layer_widths[1], blocks=layers[0], 
+        self.layer1 = self._make_layer(block, output_planes=layer_widths[1],  blocks=layers[0], 
                                        width=convsize, stride=2)
         self.layer2 = self._make_layer(block, output_planes=layer_widths[2], blocks=layers[1], 
                                        width=convsize, stride=2)
-        self.layer3 = self._make_layer(block, output_planes=layer_widths[3], blocks=layers[2], 
+        self.layer3 = self._make_layer(block, output_planes=layer_widths[3], internal_mh_attn=args.internal_mh_attn, blocks=layers[2], 
                                        width=convsize, stride=2)
-        self.layer4 = self._make_layer(block, output_planes=layer_widths[4], blocks=layers[3], 
+        self.layer4 = self._make_layer(block, output_planes=layer_widths[4],  blocks=layers[3], 
                                        width=convsize, stride=2)
 
-        if self.use_lang_embed:
+        if self.lang_embed_type != "na":
             self.l1_embedder = LangIdEmbedder(len(lang_ids), self.lang_embed_dim)
             self.l2_embedder = LangIdEmbedder(len(lang_ids), self.lang_embed_dim)
             self.l3_embedder = LangIdEmbedder(len(lang_ids), self.lang_embed_dim)
@@ -183,10 +170,13 @@ class ResDavenet(nn.Module):
             # self.pool_func = nn.AdaptiveAvgPool2d((1, 1))
             self.head_layer = self.avg_output
         elif self.output_head_str == "mh_attn":
-            self.head_layer = MyMHAttention(layer_widths[-1], nhead=8, seq_len=500, scale_pe=scale_pe)
+            self.head_layer = MyMHAttention(layer_widths[-1], nhead=8, seq_len=500, scale_pe=scale_pe, dropout=self.mh_dropout, use_cls=use_cls)
+        elif self.output_head_str == "transformer":
+            self.head_layer = MyTransformer(layer_widths[-1], nhead=8, seq_len=500, scale_pe=scale_pe, dropout=self.mh_dropout, use_cls=use_cls,
+                                            dim_feedforward=args.ff_dim, padding_mask=args.padding_mask)
 
 
-    def _make_layer(self, block, output_planes, blocks, width=9, stride=1):
+    def _make_layer(self, block, output_planes, blocks, internal_mh_attn=False, width=9, stride=1):
         """
             Makes a sequential speech layer. During the forward pass, the -1 dimension will be 
 
@@ -197,6 +187,8 @@ class ResDavenet(nn.Module):
         downsample = None
         if stride != 1 or self.inplanes != output_planes * block.expansion:
             # reduce the -3 dimension from self.inplanes to output_planes (1d conv across the channel dim)
+            # With kernel_size=1 the filters span the channel/feature dimension only
+            # Since stride=2 this essentially "skips" every other time step, thereby downsampling
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes, output_planes * block.expansion,
                         kernel_size=1, stride=stride, bias=False),
@@ -208,14 +200,18 @@ class ResDavenet(nn.Module):
 
         layers.append(block(self.inplanes, output_planes, width=width, stride=stride, 
                             downsample=downsample))
-        self.inplanes = output_planes * block.expansion
 
-        
+        self.inplanes = output_planes * block.expansion
 
         for i in range(1, blocks):
             layers.append(block(self.inplanes, output_planes, width=width, stride=1))
             
-        if self.use_lang_embed:
+        if internal_mh_attn:
+            layers.append(MyMHAttention(self.inplanes, nhead=8, seq_len=500, scale_pe=self.scale_pe,dropout=self.mh_dropout, 
+                          use_cls=self.use_cls, single_output=False))
+
+        
+        if self.lang_embed_type == "chan":
             # The next layer should expect extra dims in the channel
             self.inplanes += self.lang_embed_dim
         return nn.Sequential(*layers)
@@ -252,57 +248,77 @@ class ResDavenet(nn.Module):
         # x dims: [batch, audio_feat_dim, max_time_steps]
         orig_frames = x.size(-1)
         orig_x = x 
-        if x.dim() == 3:
+        if x.dim() == 3: 
+            # Create channel dimension to serve as output embedding dimension
             x = x.unsqueeze(1)
-        # x dims: [batch, 1, audio_feat_dim, max_time_steps]
+            # x dims: [batch, 1, audio_feat_dim, max_time_steps]
 
-        if self.use_lang_embed:
+        if self.lang_embed_type != "na":
             x = self.input_embed_layer(x, self.lang_id2idx[view_id], concat_dim=2, first_layer=True)
             # x dims: [batch, 1, audio_feat_dim+lang_embed_dims, max_time_steps]
+            if self.lang_embed_type == "chan":
+                seq_speech_layers_concat_dim = 1
+            elif self.lang_embed_type == "feat":
+                seq_speech_layers_concat_dim = 2
+            elif self.lang_embed_type == "seq":
+                seq_speech_layers_concat_dim = 3
 
 
         x = self.conv1(x)
         # x dims: [batch, out_dims, 1,  downsamp_time_steps]
 
-        after_first_conv = x
+        after_first_conv = x # save tensor for retroactive debug display if nan/inf detected
+
         x = self.bn1(x)
         x = self.relu(x)
 
-        if self.use_lang_embed:
-            x = self.l1_embedder(x, self.lang_id2idx[view_id], concat_dim=1)
-            # x dims: [batch, out_dims+lang_embed_dims, 1,  downsamp_time_steps]
+        if self.lang_embed_type != "na":
+            # Concat lang embedding to seq_speech_layers_concat_dim
+            x = self.l1_embedder(x, self.lang_id2idx[view_id], concat_dim=seq_speech_layers_concat_dim)
         x = self.layer1(x)
         # x dims: [batch, out_dims, 1,  downsamp_time_steps]
 
-        if self.use_lang_embed:
-            x = self.l2_embedder(x, self.lang_id2idx[view_id], concat_dim=1)
+        if self.lang_embed_type != "na":
+            x = self.l2_embedder(x, self.lang_id2idx[view_id], concat_dim=seq_speech_layers_concat_dim)
         x = self.layer2(x)
 
-        if self.use_lang_embed:
-            x = self.l3_embedder(x, self.lang_id2idx[view_id], concat_dim=1)
+        if self.lang_embed_type != "na":
+            x = self.l3_embedder(x, self.lang_id2idx[view_id], concat_dim=seq_speech_layers_concat_dim)
         x = self.layer3(x)
 
-        if self.use_lang_embed:
-            x = self.l4_embedder(x, self.lang_id2idx[view_id], concat_dim=1)
+        if self.lang_embed_type != "na":
+            x = self.l4_embedder(x, self.lang_id2idx[view_id], concat_dim=seq_speech_layers_concat_dim)
+
         x = self.layer4(x)
         # x dims: [batch, embed_dims, 1, downsampled_time_steps]
 
-        x = x.permute(0,3,2,1)
-        # x dims: [batch, downsampled_time_steps, 1, embed_dims]
+        ##### NOTE: Changed the following block on 11-9-2021 before seq-lang-embedding experiment ########
+        ##### I don't think it make any difference for rest of the code, but change was needed to make the 
+        ##### feat-lang-embedding functionality consistent. Since the output feat dim must be 1024, 
+        ##### the lang embedding features (when appended to the feat dim) must be flattened into the 
+        ##### time_steps dim rather than the output embed_dim
+        # x = x.permute(0,3,2,1)
+        # # x dims: [batch, downsampled_time_steps, 1, embed_dims]
+        # x = x.flatten(-2)
+        # # x dims: [batch, downsampled_time_steps, embed_dims]
+
         x = x.flatten(-2)
-        pre_head_x = x
+        # x dims: [batch, embed_dims, downsampled_time_steps]
+        x = x.permute(0,2,1)
         # x dims: [batch, downsampled_time_steps, embed_dims]
+
+        pre_head_x = x
 
         pooling_ratio = round(orig_frames / x.size(1))
         curr_nframes = self.get_curr_nframes(nframes, pooling_ratio)
-
         x = self.head_layer(x, nframes=curr_nframes)
+        # x dims: [batch, embed_dim]
         
+        # Debug: check for nans or infs. Print if found, along with preceeding tensor to find source
         if self.check_tensor(x, view_id, "output CHECK"):
             self.check_tensor(orig_x, view_id, "input")
             self.check_tensor(after_first_conv, view_id, "output")
             self.check_tensor(pre_head_x, view_id, "pre-head")
-        # x dims: [batch, embed_dim]
         return x
 
     def avg_output(self, audio_outputs, nframes=None, **kwargs):

@@ -42,7 +42,7 @@ def get_trainable_params(optimizer):
 
 def check_gradient(optimizer, epoch_step, args):
     grad_norm = collect_gradient_from_opt(optimizer, normalize=True)
-    warning_size = 100
+    warning_size = 500
     if grad_norm > warning_size or grad_norm > args.clip_grad:
         print(f"TRAINER: WARNING: (epoch step {epoch_step+1}) Gradient norm has become very large({grad_norm:.3f})).", end=" ")
         # Clip Gradient

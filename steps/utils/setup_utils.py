@@ -11,6 +11,13 @@ from .aux_nets_utils import prep_byol_aux_nets
 def get_loss_function(args):
     if args.loss == "info_nce":
         return InfoNCE(temperature=args.temperature, sim_measure=args.sim_measure)
+    elif args.loss == 'masked_margin_sm':
+        return InfoNCE(temperature=args.temperature, sim_measure=args.sim_measure, masked_margin=True)
+    elif args.loss == 'sched_masked_margin_sm':
+        return InfoNCE(temperature=args.temperature, sim_measure=args.sim_measure, masked_margin=True, scheduler=True)
+    elif args.loss == 'adapt_masked_margin_sm':
+        return InfoNCE(temperature=args.temperature, sim_measure=args.sim_measure, masked_margin=True, scheduler=True, adaptive=True)
+
     elif args.loss == 'triplet':
         return TripletLoss(margin=args.margin, use_hard_neg=args.use_hard_neg) 
     elif args.loss == 'triplet_w_hardneg':
@@ -67,17 +74,64 @@ def prepare_models(image_model, audio_models, device, args):
 
     return image_model, audio_models, aux_nets
 
+class Tracker():
+    def __init__(self, layers_dict, params_dict, layers_tot, params_tot):
+        self.layers_dict = layers_dict
+        self.params_dict = params_dict
+        self.layers_tot = layers_tot
+        self.params_tot = params_tot
+
+    def __call__(self,values, key):
+
+        tmp = len(values)
+        self.layers_dict[key] = tmp
+        self.layers_tot += tmp
+        
+        tmp = sum([torch.prod(torch.tensor(p.shape)) for p in values])
+        self.params_dict[key] = tmp
+        self.params_tot += tmp
+
+        return self.layers_dict, self.params_dict, self.layers_tot, self.params_tot
+
+
+
+
 def get_all_model_params(audio_models, image_model, aux_nets, args):
     audio_trainables = list()
+    trainable_layers_dict = dict()  
+    trainable_params_dict = dict() 
+    tot_trainable_layers = 0
+    tot_trainable_params = 0
+    tracker = Tracker(trainable_layers_dict, trainable_params_dict, tot_trainable_layers, tot_trainable_params)
+
     
     # Audio encoders
     if args.shared_audio_encoder == "na":
         for lang_id in audio_models.keys():
-            audio_trainables.extend([p for p in audio_models[lang_id].parameters() if p.requires_grad])
+            t_params = [p for p in audio_models[lang_id].parameters() if p.requires_grad]
+            audio_trainables.extend(t_params)
+
+            (trainable_layers_dict, trainable_params_dict, 
+                    tot_trainable_layers, tot_trainable_params) = tracker(t_params, lang_id)
+
+            # tmp = sum([torch.prod(torch.tensor(p.shape)) for p in t_params])
+            # num_trainable_params_dict[lang_id] = tmp
+            # tot_trainable_params += tmp
+
     else:
-        # Get params from only one (of any) audio models
+        # Get params from only one (of any) audio models. They are all the same model
         any_key = [k for k in audio_models.keys()][0]
-        audio_trainables.extend([p for p in audio_models[any_key].parameters() if p.requires_grad])
+        t_params = [p for p in audio_models[any_key].parameters() if p.requires_grad]
+        audio_trainables.extend(t_params)
+
+        (trainable_layers_dict, trainable_params_dict, 
+                tot_trainable_layers, tot_trainable_params) = tracker(t_params, "shared_enc")
+        # tmp = len(t_params)
+        # len_trainable_layers_dict["shared_enc"] = len(t_params)
+        # tot_trainable_layers += tmp
+        # tmp = sum([torch.prod(torch.tensor(p.shape)) for p in t_params])
+        # num_trainable_params_dict["shared_enc"] = tmp
+        # tot_trainable_params += tmp
 
 
     # Image encoder
@@ -87,15 +141,26 @@ def get_all_model_params(audio_models, image_model, aux_nets, args):
     else:
         image_trainables = [p for p in image_model.parameters() if p.requires_grad]
 
-    # Auxillary networks
+
+    (trainable_layers_dict, trainable_params_dict, 
+            tot_trainable_layers, tot_trainable_params) = tracker(image_trainables, "image")
+    # tmp = len(image_trainables)
+    # len_trainable_layers_dict["shared_enc"] = tmp
+    # tot_trainable_layers += tmp
+    #
+    # tmp = sum([torch.prod(torch.tensor(p.shape)) for p in image_trainables])
+    # num_trainable_params_dict["shared_enc"] = tmp
+    # tot_trainable_params += tmp
+
+
+
+    # Auxillary networks TODO: Finish this later
     if aux_nets is not None:
         pass
+
     trainables = audio_trainables + image_trainables
-    len_trainable_layers = len(trainables)
-    num_trainable_params = sum([torch.prod(torch.tensor(p.shape)) for p in trainables])
-
-
-    return trainables, len_trainable_layers, num_trainable_params
+    return (trainables, tot_trainable_layers, tot_trainable_params, 
+                trainable_layers_dict, trainable_params_dict)
 
 def get_partitioned_model_params(audio_models, image_model, aux_nets, args):
     """
@@ -159,8 +224,11 @@ def setup_optimizer(image_model, audio_models, aux_nets, args):
     # Gather trainable parameters
     if args.loss != "byol":
         # lump all paramters together for optimization
-        trainables, len_trainable_layers, len_trainable_params = get_all_model_params(audio_models, image_model, aux_nets, args)
-        print(f'TRAINER: Total {len_trainable_layers} trainable layers/matrices. {len_trainable_params:,} trainable parameters')
+        (trainables, tot_trainable_layers, tot_trainable_params,
+                trainable_layers_dict, trainable_params_dict) = get_all_model_params(audio_models, image_model, aux_nets, args)
+        print(f'TRAINER: Total trainable layers/matrices: {tot_trainable_layers} Total trainable params: {tot_trainable_params:,}')
+        for key in trainable_layers_dict.keys():
+            print(f'\t\t{key:<12}-- total layers/matrices: {trainable_layers_dict[key]:6,} trainable parameters: {int(trainable_params_dict[key].item()):,}')
 
     else: 
         # Create param groups. trainables is a list of dicts. 

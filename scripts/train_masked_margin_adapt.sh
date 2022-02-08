@@ -8,7 +8,7 @@ trap 'printf "\x1b[20E"' err exit
 
 #### Set script defualt arguments
 # Experiment directory
-EXPDIR="debug_exps/test"
+EXPDIR="exps/MASKED_MARGIN_ADAPT"
 # EXPDIR="exps/INFONCE_MH_ATTN_02_DO"
 # If present, we will save output to expdir/file_name.txt
 LOG_FILE="log.txt" 
@@ -44,15 +44,15 @@ extra_args+=("--n-print-steps=200")
 ## ARCHITECTURE ARGS
 extra_args+=("--image-output-head=avg" "--audio-output-head=avg")
 # extra_args+=("--image-output-head=mh_attn" "--audio-output-head=mh_attn")
-# extra_args+=("--image-output-head=transformer" "--audio-output-head=transformer" "--ff-dim=2048")
+# extra_args+=("--image-output-head=transformer" "--audio-output-head=transformer", "--ff-dim=2048")
 # extra_args+=("--padding-mask")
 # extra_args+=("--mh-dropout=.1")
 # extra_args+=("--internal-mh-attn")
 # extra_args+=("--dont-use-cls")
-extra_args+=("--shared-audio-encoder=basic")
+# extra_args+=("--shared-audio-encoder=basic")
 
 ## INPUT ARGS
-extra_args+=("--lang-embed-type=chan")
+# extra_args+=("--lang-embed-type=chan")
 # extra_args+=("--lang-embed-type=seq")
 # extra_args+=("--lang-embed-type=feat")# Needs more than 2 GPUs
 
@@ -60,10 +60,10 @@ extra_args+=("--lang-embed-type=chan")
 # extra_args+=("--loss=byol")
 
 ## MASKED MARGIN | margin = 1
-extra_args+=("--loss=masked_margin_sm")
+# extra_args+=("--loss=masked_margin_sm")
 
 ## Scheduled MASKED MARGIN
-extra_args+=("--loss=sched_masked_margin_sm")
+# extra_args+=("--loss=sched_masked_margin_sm")
 
 ## Adaptive MASKED MARGIN
 extra_args+=("--loss=adapt_masked_margin_sm")

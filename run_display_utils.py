@@ -443,15 +443,16 @@ def print_model_info(model,
         print_info_line(summary, layer_name, format_str, col_lengths)
 
         # Aggregate info for total summary
-        total_params += layer_info_dict["parameters"]["total"]
+        if layer_info_dict["depth"] ==0:
+            total_params += layer_info_dict["parameters"]["total"]
+            trainable_params += layer_info_dict["parameters"]["trainable"]
+            total_param_size += layer_info_dict["parameters"]["num_bytes"]
+            total_buffer_size += layer_info_dict["parameters"]["num_buffer_bytes"]
 
         if layer_info_dict["is_standard"] and layer_info_dict["parameters"]["total"] > 0: # Don't count the container layers, they are already included implicitly
             total_output += np.prod(sum([np.prod(shape) for shape in layer_info_dict["output_shapes"]]))
 
 
-        trainable_params += layer_info_dict["parameters"]["trainable"]
-        total_param_size += layer_info_dict["parameters"]["num_bytes"]
-        total_buffer_size += layer_info_dict["parameters"]["num_buffer_bytes"]
 
     submods = [sm for sm in model.modules()]
     submods = submods[1:]

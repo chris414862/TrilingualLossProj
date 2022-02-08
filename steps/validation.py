@@ -40,7 +40,7 @@ def validate(image_model,audio_models, val_loader, device, args):
             # image_output dims: [batch, embed_dim]
             I_embeddings.append(image_output)
             for lang_id in audio_models.keys():
-                audio_output = audio_models[lang_id](target_audio_input[lang_id]['lmspecs'], target_audio_input[lang_id]['nframes'])
+                audio_output = audio_models[lang_id](target_audio_input[lang_id]['lmspecs'], target_audio_input[lang_id]['nframes'], view_id=lang_id)
                 audio_output = audio_output.to('cpu').detach()
                 # audio_output dims: [batch, embed_dim]
                 A_embeddings[lang_id].append(audio_output)

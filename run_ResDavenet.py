@@ -123,8 +123,10 @@ def get_default_parser(parser=None):
             help='ResDavenet layer/block sizes')
     parser.add_argument('--layer-depths', type=str, default='2,2,2,2', 
             help='ResDavenet depth of each residual block')
-    parser.add_argument('--use-lang-embed', action="store_true",
-            help="Append language id embeddings to each layer input in shared audio model")
+    parser.add_argument('--lang-embed-type', default="na",
+            choices=['na', 'seq', 'feat', 'chan'],
+            help="Where language embedding will be appended to in shared model. 'seq' appends to sequence dimension. "+
+                 "'chan' appends to the channel dimension. 'na' disables language embeddings")
     parser.add_argument('--lang-embed-dim', type=int, default=8, 
             help="Size of embedding to append to each layer input in shared audio model")
     parser.add_argument('--convsize', type=int, default=9,
@@ -149,15 +151,25 @@ def get_default_parser(parser=None):
     # parser.add_argument('--jitter', type=float, default=0.12, 
     #         help='Temporal jitter probability (equal for both left and right)')
     parser.add_argument('--image-output-head', default="avg", 
-            choices=['avg', 'mh_attn', 'custom_self_attn'],
+            choices=['avg', 'mh_attn', 'custom_self_attn', "transformer"],
             help='Head layer to use to get single vector representation of the image model. '+
-                 'Options: ["avg", "mh_attn", "custom_self_attn"]. '+
+                 'Options: ["avg", "mh_attn", "custom_self_attn", "transformer"]. '+
                  'Default: "avg"')
+    parser.add_argument('--mh-dropout', type=float, default=.1,
+            help='Dropout percent for multihead attention layer')
+    parser.add_argument('--dont-use-cls', action="store_true",
+            help="Use first input rather than a cls embedding")
     parser.add_argument('--audio-output-head', default="avg", 
-            choices=['avg', 'mh_attn', 'custom_self_attn'],
+            choices=['avg', 'mh_attn', 'custom_self_attn', 'transformer'],
             help='Head layer to use to get single vector representation of the audio model. '+
-                 'Options: ["avg", "mh_attn", "custom_self_attn"]. '+
+                 'Options: ["avg", "mh_attn", "custom_self_attn", "transformer"]. '+
                  'Default: "avg"')
+    parser.add_argument('--ff-dim', type=int, default=2048,
+            help='Dimension for the intermediate output between the two linear sub-layers of the transformer layer')
+    parser.add_argument('--internal-mh-attn', action="store_true",
+            help='Use multihead attention layer b/w the 3rd and 4th layers')
+    parser.add_argument('--padding-mask', action="store_true",
+            help='Dimension for the intermediate output between the two linear sub-layers of the transformer layer')
     parser.add_argument('--no-scale-pe', action="store_true",
             help="Don't scale (by sqrt(d_model))in the positional embeddings layer")
     parser.add_argument('--shared-audio-encoder', default="na",
@@ -214,8 +226,11 @@ def get_train_parser(parser=None):
             help='Use dev set for evaluation, rather than test set. '+
             f'Must give integer to specify dev set size.')
     parser.add_argument('--loss', type=str, default='info_nce',
-            choices=['triplet', 'triplet_w_hardneg','info_nce','hyperspheric', 'masked_margin_sm', "byol"],
+            choices=['triplet', 'triplet_w_hardneg','info_nce','hyperspheric', 'masked_margin_sm', "byol", 'sched_masked_margin_sm', 'adapt_masked_margin_sm'],
             help='Loss function to use')
+
+    # parser.add_argument('--mm-sm-scheduler', action="store_true",
+    #         help='Use the schedule proposed in original paper.')
     parser.add_argument('--use-hard-neg', action="store_true",
             help='Use negative samples that are close to the correct target.')
     parser.add_argument('--clip-grad', type=float, default=MAX_GRAD,
@@ -335,41 +350,47 @@ if __name__ == '__main__':
     lang_ids = [lang.strip().lower() for lang in args.langs.split(",")]
     audio_models = dict()
     if args.shared_audio_encoder == "na":
-        assert not args.use_lang_embed, "--use-lang-embed only used when --shared-audio-encode is NOT 'na'"
+        assert args.lang_embed_type == "na", "--lang-embed-type must be 'na' when --shared-audio-encode is 'na'"
         for lang_id in lang_ids:
-            audio_models[lang_id] = create_audio_model(
-                    args.audio_model, 
-                    args.audio_feature_dim, 
-                    # args.VQ_sizes, 
-                    args.layer_widths, 
-                    args.layer_depths,
-                    # args.VQ_turnon, 
-                    args.convsize, 
-                    # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
-                    args.audio_output_head,
-                    args.no_scale_pe,
-                    args.use_lang_embed,
-                    lang_ids,
-                    args.lang_embed_dim)
+            audio_models[lang_id] = create_audio_model(args, lang_ids)
+                    # args.audio_model, 
+                    # args.audio_feature_dim, 
+                    # # args.VQ_sizes, 
+                    # args.layer_widths, 
+                    # args.layer_depths,
+                    # # args.VQ_turnon, 
+                    # args.convsize, 
+                    # # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
+                    # args.audio_output_head,
+                    # args.mh_dropout,
+                    # args.no_scale_pe,
+                    # args.lang_embed_type,
+                    # lang_ids,
+                    # args.lang_embed_dim)
 
     else:
-        shared_model = create_audio_model(
-                args.audio_model, args.audio_feature_dim, 
-                # args.VQ_sizes, 
-                args.layer_widths, args.layer_depths,
-                # args.VQ_turnon, 
-                args.convsize, 
-                # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
-                args.audio_output_head,
-                args.no_scale_pe,
-                args.use_lang_embed,
-                lang_ids,
-                args.lang_embed_dim)
+        shared_model = create_audio_model(args, lang_ids)
+        # shared_model = create_audio_model(
+        #         args.audio_model, 
+        #         args.audio_feature_dim, 
+        #         # args.VQ_sizes, 
+        #         args.layer_widths, 
+        #         args.layer_depths,
+        #         # args.VQ_turnon, 
+        #         args.convsize, 
+        #         # args.VQ_commitment_cost,args.jitter, args.init_ema_mass, args.init_std, args.nonneg_init,
+        #         args.audio_output_head,
+        #         args.mh_dropout,
+        #         args.no_scale_pe,
+        #         args.lang_embed_type,
+        #         lang_ids,
+        #         args.lang_embed_dim)
 
         for lang_id in lang_ids:
             audio_models[lang_id] = shared_model
 
-    image_model = create_image_model(args.image_model, args.pretrained_image_model, args.image_output_head, args.no_scale_pe, args.edim)
+    image_model = create_image_model(args)
+    #.image_model, args.pretrained_image_model, args.image_output_head, args.mh_dropout, args.no_scale_pe, args.edim)
     
     if args.print_summary: # prints info about each layer and expected memory requirements
         image_model_input, audio_model_input_dict = train_dset.__getitem__(0)
