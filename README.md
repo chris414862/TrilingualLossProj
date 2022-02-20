@@ -5,7 +5,7 @@
  but can also be viewed in the ```thesis/``` directory of this repository.* \*\*
 
 This project attempts to optimize the alignment of vector representations of speech and images.
-Improvement in this alignment should not only lead directly to increased performance down-stream tasks such as neural image retrieval, but also promises to aid in ongoing research efforts to utilize multi-modal data (e.g. vision and speech) to enhance tasks such as speech translation and low-resource ASR.
+Improvement in this alignment should not only lead directly to increased performance down-stream tasks such as neural speech-to-image retrieval, but also promises to aid in ongoing research efforts to utilize multi-modal data (e.g. vision and speech) to enhance tasks such as speech translation and low-resource ASR.
  
 
 ## Goal
